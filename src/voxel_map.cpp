@@ -57,11 +57,12 @@ void loadVoxelConfig(ros::NodeHandle &nh, VoxelMapConfig &voxel_config)
   nh.param<vector<int>>("lio/layer_init_num", voxel_config.layer_init_num_, vector<int>{5,5,5,5,5});
   nh.param<int>("lio/max_points_num", voxel_config.max_points_num_, 50);
   nh.param<int>("lio/max_iterations", voxel_config.max_iterations_, 5);
-  nh.param<double>("lio/intensity_threshold", voxel_config.intensity_thresh_, -1.0);
 
   nh.param<bool>("local_map/map_sliding_en", voxel_config.map_sliding_en, false);
   nh.param<int>("local_map/half_map_size", voxel_config.half_map_size, 100);
   nh.param<double>("local_map/sliding_thresh", voxel_config.sliding_thresh, 8);
+  nh.param<double>("lio/sky_voxel_distance_threshold", voxel_config.sky_voxel_distance_threshold_, 4.0);
+  nh.param<std::string>("uav/elevation_axis", voxel_config.elevation_axis_, "z");
 }
 
 void VoxelOctoTree::init_plane(const std::vector<pointWithVar> &points, VoxelPlane *plane)
@@ -458,14 +459,23 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
    
     // double t1 = omp_get_wtime();
     ptpl_effective_list_.clear();
-    BuildResidualListOMP(pv_list_, ptpl_effective_list_); // 寻找点云对应的平面并计算残差
+    ptpl_ineffective_list_.clear();
+    std::vector<bool> useful_ptpl(pv_list_.size());
+    std::vector<bool> ignored_ptpl(pv_list_.size());
+    std::vector<PointToPlane> all_ptpl_list(pv_list_.size());
+    // printf("Building residual list...\n");
+    BuildResidualListOMP(pv_list_, useful_ptpl, ignored_ptpl, all_ptpl_list); // 寻找点云对应的平面并计算残差
+    // printf("Building residual list done.\n");
 
     // build_residual_time += omp_get_wtime() - t1;
-
     // 统计总残差和有效特征点数量
-    for (int i = 0; i < ptpl_effective_list_.size(); i++)
+    // 将所有有效的点面对应关系存储到最终的列表中
+    for (size_t i = 0; i < pv_list_.size(); i++)
     {
-      total_residual += fabs(ptpl_effective_list_[i].dis_to_plane_);
+      if (useful_ptpl[i]) {
+        ptpl_effective_list_.push_back(all_ptpl_list[i]);
+        total_residual += fabs(all_ptpl_list[i].dis_to_plane_);
+      } 
     }
     effct_feat_num_ = ptpl_effective_list_.size();
     cout << "[ LIO ] Raw feature num: " << feats_undistort_->size() << ", downsampled feature num:" << feats_down_size_ 
@@ -570,6 +580,19 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
       // VD(DIM_STATE) K_sum  = K.rowwise().sum();
       // VD(DIM_STATE) P_diag = _state.cov.diagonal();
       EKF_stop_flg = true;
+
+      for (size_t i = 0; i < ignored_ptpl.size(); i++)
+      {
+        if (!ignored_ptpl[i] && !useful_ptpl[i]) {
+          PointToPlane bad_ptpl = all_ptpl_list[i];
+          bad_ptpl.point_w_ = pv_list_[i].point_w;
+          bad_ptpl.point_b_ = pv_list_[i].point_b;
+          // bad_ptpl.intensity_ = pv_list_[i].intensity;
+          // bad_ptpl.is_valid_ = false;
+          // bad_ptpl.dis_to_plane_ = 1.0; // 设置一个较大的距离
+          ptpl_ineffective_list_.push_back(bad_ptpl);
+        }
+      }
     }
     if (EKF_stop_flg) break;
   }
@@ -604,16 +627,72 @@ void VoxelMapManager::TransformLidar(const Eigen::Matrix3d rot, const Eigen::Vec
   }
 }
 
+// 根据高程方向计算柱的位置
+VOXEL_COLUMN_LOCATION VoxelMapManager::GetColumnLocation(const VOXEL_LOCATION &position) const
+{
+  int64_t axis1, axis2;
+
+  // 根据高程方向选择两个非高程轴作为柱的坐标
+  if (elevation_axis_index_ == 0) { // 高程方向是x轴，柱由y,z组成
+    axis1 = position.y;
+    axis2 = position.z;
+  } else if (elevation_axis_index_ == 1) { // 高程方向是y轴，柱由x,z组成
+    axis1 = position.x;
+    axis2 = position.z;
+  } else { // 高程方向是z轴，柱由x,y组成
+    axis1 = position.x;
+    axis2 = position.y;
+  }
+
+  return VOXEL_COLUMN_LOCATION(axis1, axis2);
+}
+
 void VoxelMapManager::UpdateGroundFlagForColumn(const VOXEL_COLUMN_LOCATION &column_key,
                                                 std::map<int64_t, VoxelOctoTree *> &column_voxels)
 {
+  // 重置所有体素的地面和天空标志
   for (auto &voxel_pair : column_voxels)
   {
     voxel_pair.second->is_ground_voxel_ = false;
+    voxel_pair.second->is_sky_voxel_ = false;
   }
-  if (!column_voxels.empty())
+
+  // 只有当柱子中有多于一个体素时，才进行地面和天空体素标记
+  if (column_voxels.size() > 1)
   {
-    column_voxels.begin()->second->is_ground_voxel_ = true;
+    // 找到指定轴上最小值的体素作为地面体素
+    auto bottom_voxel = column_voxels.begin()->second;
+    for (auto &voxel_pair : column_voxels)
+    {
+      double current_height = voxel_pair.second->voxel_center_[elevation_axis_index_] * elevation_multiplier_;
+      double bottom_height = bottom_voxel->voxel_center_[elevation_axis_index_] * elevation_multiplier_;
+      if (current_height < bottom_height) {
+        bottom_voxel = voxel_pair.second;
+      }
+    }
+    bottom_voxel->is_ground_voxel_ = true;
+
+    // 计算其他体素到地面体素在指定轴上的距离，判断是否为天空体素
+    double ground_height = bottom_voxel->voxel_center_[2];
+    double sky_threshold_height = ground_height + config_setting_.sky_voxel_distance_threshold_;
+    for (auto &voxel_pair : column_voxels)
+    {
+      if (voxel_pair.second != bottom_voxel)
+      {
+        double current_height = voxel_pair.first * elevation_multiplier_;
+
+        // 如果超过阈值，标记为天空体素
+        if (current_height > sky_threshold_height)
+        {
+          voxel_pair.second->is_sky_voxel_ = true;
+        }
+      }
+    }
+  }
+  else {// 对于单个体素的情况
+    auto single_voxel = column_voxels.begin()->second;
+    single_voxel->is_ground_voxel_ = true;
+    single_voxel->is_sky_voxel_ = true;
   }
 }
 
@@ -623,22 +702,40 @@ void VoxelMapManager::RegisterVoxelToColumn(const VOXEL_LOCATION &position, Voxe
   {
     return;
   }
-  VOXEL_COLUMN_LOCATION column_key(position.x, position.y);
+  VOXEL_COLUMN_LOCATION column_key = GetColumnLocation(position);
   auto &column_voxels = column_voxels_[column_key];
-  column_voxels[position.z] = voxel;
+  // 使用高程轴的坐标作为键
+  int64_t elevation_key;
+  if (elevation_axis_index_ == 0) {
+    elevation_key = position.x;
+  } else if (elevation_axis_index_ == 1) {
+    elevation_key = position.y;
+  } else {
+    elevation_key = position.z;
+  }
+  column_voxels[elevation_key] = voxel;
   UpdateGroundFlagForColumn(column_key, column_voxels);
 }
 
 void VoxelMapManager::UnregisterVoxelFromColumn(const VOXEL_LOCATION &position)
 {
-  VOXEL_COLUMN_LOCATION column_key(position.x, position.y);
+  VOXEL_COLUMN_LOCATION column_key = GetColumnLocation(position);
   auto column_iter = column_voxels_.find(column_key);
   if (column_iter == column_voxels_.end())
   {
     return;
   }
   auto &column_voxels = column_iter->second;
-  auto voxel_iter = column_voxels.find(position.z);
+  // 使用高程轴的坐标作为键
+  int64_t elevation_key;
+  if (elevation_axis_index_ == 0) {
+    elevation_key = position.x;
+  } else if (elevation_axis_index_ == 1) {
+    elevation_key = position.y;
+  } else {
+    elevation_key = position.z;
+  }
+  auto voxel_iter = column_voxels.find(elevation_key);
   if (voxel_iter != column_voxels.end())
   {
     column_voxels.erase(voxel_iter);
@@ -780,17 +877,12 @@ void VoxelMapManager::UpdateVoxelMap(const std::vector<pointWithVar> &input_poin
 }
 
 // 为每个点云寻找对应的平面,并计算点到平面的距离，用于ICP配准
-void VoxelMapManager::BuildResidualListOMP(std::vector<pointWithVar> &pv_list, std::vector<PointToPlane> &ptpl_list)
+void VoxelMapManager::BuildResidualListOMP(std::vector<pointWithVar> &pv_list, std::vector<bool> &useful_ptpl, std::vector<bool> &ignored_ptpl, std::vector<PointToPlane> &all_ptpl_list)
 {
   int max_layer = config_setting_.max_layer_; // 获取最大八叉树层数
   double voxel_size = config_setting_.max_voxel_size_; // 获取体素大小
   double sigma_num = config_setting_.sigma_num_; // 获取标准差倍数
   std::mutex mylock; // 线程锁,用于多线程同步,保护共享资源
-  ptpl_list.clear();
-  ptpl_ineffective_list_.clear();
-
-  std::vector<PointToPlane> all_ptpl_list(pv_list.size()); // 存储所有点面的对应关系
-  std::vector<bool> useful_ptpl(pv_list.size()); // 标记每个点是否找到有效的平面
   std::vector<size_t> index(pv_list.size()); // 索引数组,用于多线程处理
 
   // 初始化索引和标记数组
@@ -798,6 +890,7 @@ void VoxelMapManager::BuildResidualListOMP(std::vector<pointWithVar> &pv_list, s
   {
     index[i] = i;
     useful_ptpl[i] = false;
+    ignored_ptpl[i] = false;
   }
 
   // 多线程处理每个点云
@@ -865,8 +958,13 @@ void VoxelMapManager::BuildResidualListOMP(std::vector<pointWithVar> &pv_list, s
         // 在相邻体素中查找平面,如果找到则构建残差
         auto iter_near = voxel_map_.find(near_position);
         if (iter_near != voxel_map_.end()) { build_single_residual(pv, iter_near->second, 0, is_sucess, prob, single_ptpl); }
-        
       }
+
+      if (current_octo->is_ground_voxel_ || hasAdjacentGroundVoxel(current_octo, position) > 0 || current_octo->is_sky_voxel_)
+      {
+        ignored_ptpl[i] = true;
+      }
+
       if (is_sucess)
       { // 如果成功找到平面,则将点面对应关系存储到共享资源中
         mylock.lock();
@@ -881,21 +979,9 @@ void VoxelMapManager::BuildResidualListOMP(std::vector<pointWithVar> &pv_list, s
         mylock.unlock();
       }
     }
-  }
-  // 将所有有效的点面对应关系存储到最终的列表中
-  for (size_t i = 0; i < useful_ptpl.size(); i++)
-  {
-    if (useful_ptpl[i]) {
-      ptpl_list.push_back(all_ptpl_list[i]);
-    } else {
-      PointToPlane bad_ptpl = all_ptpl_list[i];
-      bad_ptpl.point_w_ = pv_list[i].point_w;
-      bad_ptpl.point_b_ = pv_list[i].point_b;
-      bad_ptpl.intensity_ = pv_list[i].intensity;
-      bad_ptpl.is_valid_ = false;
-      bad_ptpl.dis_to_plane_ = 1.0; // 设置一个较大的距离
-      ptpl_ineffective_list_.push_back(bad_ptpl);
-      }
+    else{
+      ignored_ptpl[i] = true;
+    }
   }
 }
 
@@ -904,18 +990,13 @@ void VoxelMapManager::build_single_residual(pointWithVar &pv, const VoxelOctoTre
 {
   int max_layer = config_setting_.max_layer_;
   double sigma_num = config_setting_.sigma_num_;
+  int voxel_multi = int(config_setting_.max_voxel_size_ / 0.5 + 0.5);
 
-  double radius_k = 3;
+  double radius_k = 3 * voxel_multi;
   Eigen::Vector3d p_w = pv.point_w;
   if (current_octo->plane_ptr_->is_plane_) //检查当前体素内是否包含有效平面
   {
     VoxelPlane &plane = *current_octo->plane_ptr_;
-
-    if (config_setting_.intensity_thresh_ >= 0.0)
-    {
-      double intensity_diff = fabs(static_cast<double>(pv.intensity) - static_cast<double>(plane.mean_intensity_));
-      if (intensity_diff > config_setting_.intensity_thresh_) { return; }
-    }
 
     Eigen::Vector3d p_world_to_center = p_w - plane.center_;
     float dis_to_plane = fabs(plane.normal_(0) * p_w(0) + plane.normal_(1) * p_w(1) + plane.normal_(2) * p_w(2) + plane.d_); // 点到平面的距离
@@ -1169,5 +1250,60 @@ void VoxelMapManager::clearMemOutOfMap(const int& x_max,const int& x_min,const i
   }
   std::cout<<YELLOW<<"[DEBUG]: Delete "<<delete_voxel_cout<<" root voxels"<<RESET<<"\n";
   // std::cout<<RED<<"[DEBUG]: Delete "<<delete_voxel_cout<<" voxels using "<<delete_time<<" s"<<RESET<<"\n";
+}
+
+int VoxelMapManager::hasAdjacentGroundVoxel(VoxelOctoTree *current_octo, const VOXEL_LOCATION &current_pos)
+{
+  int adjacent_ground_count = 0;
+
+  // 根据高程轴方向确定水平面的两个轴
+  int axis1_index, axis2_index;
+
+  if (elevation_axis_index_ == 0) { // 高程方向是x轴，水平面是yz平面
+    axis1_index = 1; // y轴
+    axis2_index = 2; // z轴
+  } else if (elevation_axis_index_ == 1) { // 高程方向是y轴，水平面是xz平面
+    axis1_index = 0; // x轴
+    axis2_index = 2; // z轴
+  } else { // 高程方向是z轴，水平面是xy平面
+    axis1_index = 0; // x轴
+    axis2_index = 1; // y轴
+  }
+
+  // 检查水平面内的8邻域体素
+  for (int d1 = -1; d1 <= 1; d1++) {
+    for (int d2 = -1; d2 <= 1; d2++) {
+      // 跳过中心体素（自身）
+      if (d1 == 0 && d2 == 0) {
+        continue;
+      }
+
+      // 计算相邻体素的位置
+      VOXEL_LOCATION adjacent_pos = current_pos;
+
+      // 根据轴索引设置偏移
+      if (axis1_index == 0 && axis2_index == 1) { // xy平面
+        adjacent_pos.x = current_pos.x + d1;
+        adjacent_pos.y = current_pos.y + d2;
+      } else if (axis1_index == 0 && axis2_index == 2) { // xz平面
+        adjacent_pos.x = current_pos.x + d1;
+        adjacent_pos.z = current_pos.z + d2;
+      } else if (axis1_index == 1 && axis2_index == 2) { // yz平面
+        adjacent_pos.y = current_pos.y + d1;
+        adjacent_pos.z = current_pos.z + d2;
+      }
+
+      // 在voxel_map中查找相邻体素
+      auto iter = voxel_map_.find(adjacent_pos);
+      if (iter != voxel_map_.end()) {
+        VoxelOctoTree *adjacent_voxel = iter->second;
+        if (adjacent_voxel != nullptr && adjacent_voxel->is_ground_voxel_) {
+          adjacent_ground_count++;
+        }
+      }
+    }
+  }
+
+  return adjacent_ground_count; // 返回相邻的地面体素数量
 }
 

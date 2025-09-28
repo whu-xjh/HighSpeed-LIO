@@ -53,7 +53,6 @@ LIVMapper::LIVMapper(ros::NodeHandle &nh)
   laserCloudWorldRGB_shared.reset(new PointCloudXYZRGB());
   ptpl_list_wait_save.clear();
   voxelmap_manager.reset(new VoxelMapManager(voxel_config, voxel_map));
-  voxelmap_ground_manager.reset(new VoxelMapManager(voxel_config, voxel_map));
   vio_manager.reset(new VIOManager());
   root_dir = ROOT_DIR;
   initializeFiles();
@@ -137,7 +136,6 @@ void LIVMapper::readParameters(ros::NodeHandle &nh)
   nh.param<bool>("publish/pub_effect_point_en", pub_effect_point_en, false);
   nh.param<bool>("publish/dense_map_en", dense_map_en, false);
   nh.param<bool>("publish/pub_cloud_body", publish_cloud_body, false);
-  nh.param<bool>("publish/publish_ground_cloud", publish_ground_cloud_en, false);
 
   p_pre->blind_sqr = p_pre->blind * p_pre->blind;
 }
@@ -414,25 +412,6 @@ void LIVMapper::handleLIO()
   {
     std::cout << "[ LIO ]: No point!!!" << std::endl;
     return;
-  }
-
-  // 地面点提取和发布
-  double ground_extract_start = omp_get_wtime();
-  if (voxelmap_ground_manager != nullptr) {
-    voxelmap_ground_manager->feats_down_world_ = feats_undistort;
-    voxelmap_ground_manager->BuildVoxelMap();
-
-    // 提取地面点
-    PointCloudXYZI::Ptr ground_points(new PointCloudXYZI());
-    extractGroundPoints(feats_undistort, ground_points);
-    double ground_extract_time = omp_get_wtime() - ground_extract_start;
-
-    if (publish_ground_cloud_en && !ground_points->empty()) {
-      publish_ground_cloud(pubGroundCloud, ground_points, ground_extract_time);
-    }
-
-    // 释放地面体素地图内存
-    voxelmap_ground_manager->voxel_map_.clear();
   }
 
   // 点云下采样
@@ -1795,7 +1774,7 @@ void LIVMapper::queueLazSaveTask(const std::string& filename, std::function<void
 
 void LIVMapper::extractGroundPoints(const PointCloudXYZI::Ptr& input_cloud, PointCloudXYZI::Ptr& ground_points)
 {
-  if (input_cloud->empty() || voxelmap_ground_manager == nullptr) {
+  if (input_cloud->empty() || voxelmap_manager == nullptr) {
     return;
   }
 
@@ -1803,7 +1782,7 @@ void LIVMapper::extractGroundPoints(const PointCloudXYZI::Ptr& input_cloud, Poin
   ground_points->reserve(input_cloud->size());
 
   // 获取体素大小
-  double voxel_size = voxelmap_ground_manager->config_setting_.max_voxel_size_;
+  double voxel_size = voxelmap_manager->config_setting_.max_voxel_size_;
 
   // 遍历输入点云中的每个点（直接使用原始坐标系，无需转换）
   for (const auto& point : input_cloud->points) {
@@ -1814,10 +1793,10 @@ void LIVMapper::extractGroundPoints(const PointCloudXYZI::Ptr& input_cloud, Poin
       static_cast<int64_t>(floor(point.z / voxel_size))
     );
 
-    // 在voxelmap_ground_manager中查找对应的体素
-    if (voxelmap_ground_manager != nullptr) {
-      auto it = voxelmap_ground_manager->voxel_map_.find(voxel_loc);
-      if (it != voxelmap_ground_manager->voxel_map_.end()) {
+    // 在voxelmap_manager中查找对应的体素
+    if (voxelmap_manager != nullptr) {
+      auto it = voxelmap_manager->voxel_map_.find(voxel_loc);
+      if (it != voxelmap_manager->voxel_map_.end()) {
         // 检查该体素是否为地面体素
         VoxelOctoTree* voxel = it->second;
         if (voxel != nullptr && voxel->is_ground_voxel_) {
@@ -1831,21 +1810,3 @@ void LIVMapper::extractGroundPoints(const PointCloudXYZI::Ptr& input_cloud, Poin
   ground_points->width = ground_points->points.size();
   ground_points->height = 1;
 }
-
-void LIVMapper::publish_ground_cloud(const ros::Publisher &pubGroundCloud, const PointCloudXYZI::Ptr &ground_points, const double &extract_time)
-{
-  if (ground_points->empty()) return;
-
-  // 创建地面点云消息
-  sensor_msgs::PointCloud2 groundCloudMsg;
-  pcl::toROSMsg(*ground_points, groundCloudMsg);
-  groundCloudMsg.header.stamp = ros::Time::now();
-  groundCloudMsg.header.frame_id = "camera_init";
-  pubGroundCloud.publish(groundCloudMsg);
-
-  // 输出提取时间信息
-  printf("\033[1;32m[ Ground Extraction ]: %zu ground points extracted, time: %.6f secs\033[0m\n",
-         ground_points->size(), extract_time);
-}
-
-

@@ -45,12 +45,17 @@ typedef struct VoxelMapConfig
   double dept_err_;
   double sigma_num_;
   bool is_pub_plane_map_;
-  double intensity_thresh_;
 
   // config of local map sliding
   double sliding_thresh;
   bool map_sliding_en;
   int half_map_size;
+
+  // config for sky voxel detection
+  double sky_voxel_distance_threshold_;
+
+  // config for elevation axis specification
+  std::string elevation_axis_;
 } VoxelMapConfig;
 
 typedef struct PointToPlane
@@ -110,11 +115,11 @@ public:
 class VOXEL_COLUMN_LOCATION
 {
 public:
-  int64_t x, y;
+  int64_t axis1, axis2; // 两个非高程方向的坐标
 
-  VOXEL_COLUMN_LOCATION(int64_t vx = 0, int64_t vy = 0) : x(vx), y(vy) {}
+  VOXEL_COLUMN_LOCATION(int64_t v1 = 0, int64_t v2 = 0) : axis1(v1), axis2(v2) {}
 
-  bool operator==(const VOXEL_COLUMN_LOCATION &other) const { return (x == other.x && y == other.y); }
+  bool operator==(const VOXEL_COLUMN_LOCATION &other) const { return (axis1 == other.axis1 && axis2 == other.axis2); }
 };
 
 // Hash value
@@ -136,7 +141,7 @@ template <> struct hash<VOXEL_COLUMN_LOCATION>
   {
     using std::hash;
     using std::size_t;
-    return (((s.y) * VOXELMAP_HASH_P) % VOXELMAP_MAX_N + (s.x));
+    return (((s.axis2) * VOXELMAP_HASH_P) % VOXELMAP_MAX_N + (s.axis1));
   }
 };
 } // namespace std
@@ -172,10 +177,11 @@ public:
   bool init_octo_;
   bool update_enable_;
   bool is_ground_voxel_ = false;
+  bool is_sky_voxel_ = false;
 
   VoxelOctoTree(int max_layer, int layer, int points_size_threshold, int max_points_num, float planer_threshold)
       : max_layer_(max_layer), layer_(layer), points_size_threshold_(points_size_threshold), max_points_num_(max_points_num),
-        planer_threshold_(planer_threshold), is_ground_voxel_(false)
+        planer_threshold_(planer_threshold), is_ground_voxel_(false), is_sky_voxel_(false)
   {
     temp_points_.clear();
     octo_state_ = 0;
@@ -242,7 +248,11 @@ public:
   std::vector<M3D> body_cov_list_;
   std::vector<pointWithVar> pv_list_;
   std::vector<PointToPlane> ptpl_effective_list_;
-std::vector<PointToPlane> ptpl_ineffective_list_;
+  std::vector<PointToPlane> ptpl_ineffective_list_;
+
+  // 高程方向配置
+  int elevation_axis_index_;  // 0=x, 1=y, 2=z
+  double elevation_multiplier_; // 1.0 or -1.0
 
   VoxelMapManager(VoxelMapConfig &config_setting, std::unordered_map<VOXEL_LOCATION, VoxelOctoTree *> &voxel_map)
       : config_setting_(config_setting), voxel_map_(voxel_map)
@@ -251,6 +261,31 @@ std::vector<PointToPlane> ptpl_ineffective_list_;
     feats_undistort_.reset(new PointCloudXYZI());
     feats_down_body_.reset(new PointCloudXYZI());
     feats_down_world_.reset(new PointCloudXYZI());
+
+    // 初始化高程方向
+    if (config_setting.elevation_axis_ == "x") {
+      elevation_axis_index_ = 0;
+      elevation_multiplier_ = 1.0;
+    } else if (config_setting.elevation_axis_ == "-x") {
+      elevation_axis_index_ = 0;
+      elevation_multiplier_ = -1.0;
+    } else if (config_setting.elevation_axis_ == "y") {
+      elevation_axis_index_ = 1;
+      elevation_multiplier_ = 1.0;
+    } else if (config_setting.elevation_axis_ == "-y") {
+      elevation_axis_index_ = 1;
+      elevation_multiplier_ = -1.0;
+    } else if (config_setting.elevation_axis_ == "z") {
+      elevation_axis_index_ = 2;
+      elevation_multiplier_ = 1.0;
+    } else if (config_setting.elevation_axis_ == "-z") {
+      elevation_axis_index_ = 2;
+      elevation_multiplier_ = -1.0;
+    } else {
+      // 默认为z轴
+      elevation_axis_index_ = 2;
+      elevation_multiplier_ = 1.0;
+    }
   };
 
   void StateEstimation(StatesGroup &state_propagat);
@@ -262,7 +297,7 @@ std::vector<PointToPlane> ptpl_ineffective_list_;
 
   void UpdateVoxelMap(const std::vector<pointWithVar> &input_points);
 
-  void BuildResidualListOMP(std::vector<pointWithVar> &pv_list, std::vector<PointToPlane> &ptpl_list);
+  void BuildResidualListOMP(std::vector<pointWithVar> &pv_list, std::vector<bool> &useful_ptpl, std::vector<bool> &ignored_ptpl, std::vector<PointToPlane> &all_ptpl_list);
 
   void build_single_residual(pointWithVar &pv, const VoxelOctoTree *current_octo, const int current_layer, bool &is_sucess, double &prob,
                              PointToPlane &single_ptpl);
@@ -273,9 +308,14 @@ std::vector<PointToPlane> ptpl_ineffective_list_;
   void clearMemOutOfMap(const int& x_max,const int& x_min,const int& y_max,const int& y_min,const int& z_max,const int& z_min );
 
 private:
+  // 根据高程方向计算柱的位置
+  VOXEL_COLUMN_LOCATION GetColumnLocation(const VOXEL_LOCATION &position) const;
+
   void RegisterVoxelToColumn(const VOXEL_LOCATION &position, VoxelOctoTree *voxel);
   void UnregisterVoxelFromColumn(const VOXEL_LOCATION &position);
   void UpdateGroundFlagForColumn(const VOXEL_COLUMN_LOCATION &column_key, std::map<int64_t, VoxelOctoTree *> &column_voxels);
+
+  int hasAdjacentGroundVoxel(VoxelOctoTree *current_octo, const VOXEL_LOCATION &current_pos);
 
   void GetUpdatePlane(const VoxelOctoTree *current_octo, const int pub_max_voxel_layer, std::vector<VoxelPlane> &plane_list);
 

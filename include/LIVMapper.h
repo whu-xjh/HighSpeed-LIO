@@ -76,7 +76,6 @@ public:
   void save_frame_world(const std::vector<PointToPlane> &ptpl_list);
   void save_frame_world_RGB(PointCloudXYZRGB::Ptr &laserCloudWorldRGB);
   void publish_frame_body(const ros::Publisher &pubLaserCloudBody);
-  void publish_ground_cloud(const ros::Publisher &pubGroundCloud, const PointCloudXYZI::Ptr &ground_points, const double &extract_time);
   void extractGroundPoints(const PointCloudXYZI::Ptr& input_cloud, PointCloudXYZI::Ptr& ground_points);
 
   void publish_visual_sub_map(const ros::Publisher &pubSubVisualMap);
@@ -113,7 +112,7 @@ public:
   double _first_lidar_time = 0.0;
   double match_time = 0, solve_time = 0, solve_const_H_time = 0;
 
-  bool lidar_map_inited = false, save_en = false, pub_effect_point_en = false, publish_cloud_body = false, publish_ground_cloud_en = false, pose_output_en = false, ros_driver_fix_en = false, hilti_en = false;
+  bool lidar_map_inited = false, save_en = false, pub_effect_point_en = false, publish_cloud_body = false, pose_output_en = false, ros_driver_fix_en = false, hilti_en = false;
   bool laz_save_en = false, effect_save_en = false;
 
   int save_interval = -1, pcd_index = 0, scan_wait_num = 0;
@@ -190,7 +189,6 @@ public:
   PreprocessPtr p_pre;
   ImuProcessPtr p_imu;
   VoxelMapManagerPtr voxelmap_manager;
-  VoxelMapManagerPtr voxelmap_ground_manager;
   VIOManagerPtr vio_manager;
 
   
