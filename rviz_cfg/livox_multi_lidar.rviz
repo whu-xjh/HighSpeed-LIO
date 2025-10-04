@@ -107,7 +107,7 @@ Visualization Manager:
           Use Fixed Frame: true
           Use rainbow: false
           Value: true
-        - Alpha: 0.2
+        - Alpha: 0.3
           Autocompute Intensity Bounds: true
           Autocompute Value Bounds:
             Max Value: 15
@@ -117,7 +117,7 @@ Visualization Manager:
           Channel Name: intensity
           Class: rviz/PointCloud2
           Color: 186; 189; 182
-          Color Transformer: Intensity
+          Color Transformer: FlatColor
           Decay Time: 3000
           Enabled: true
           Invert Rainbow: false

@@ -25,6 +25,8 @@ which is included as part of this source code package.
 #include <thread>
 #include <unistd.h>
 #include <unordered_map>
+#include <stack>
+#include <memory>
 #include <visualization_msgs/Marker.h>
 #include <visualization_msgs/MarkerArray.h>
 
@@ -51,9 +53,7 @@ typedef struct VoxelMapConfig
   bool map_sliding_en;
   int half_map_size;
 
-  // config for sky voxel detection
-  double sky_voxel_distance_threshold_;
-
+  
   // config for elevation axis specification
   std::string elevation_axis_;
 } VoxelMapConfig;
@@ -146,13 +146,6 @@ template <> struct hash<VOXEL_COLUMN_LOCATION>
 };
 } // namespace std
 
-struct DS_POINT
-{
-  float xyz[3];
-  float intensity;
-  int count = 0;
-};
-
 void calcBodyCov(Eigen::Vector3d &pb, const float range_inc, const float degree_inc, Eigen::Matrix3d &cov);
 
 class VoxelOctoTree
@@ -177,11 +170,10 @@ public:
   bool init_octo_;
   bool update_enable_;
   bool is_ground_voxel_ = false;
-  bool is_sky_voxel_ = false;
 
   VoxelOctoTree(int max_layer, int layer, int points_size_threshold, int max_points_num, float planer_threshold)
       : max_layer_(max_layer), layer_(layer), points_size_threshold_(points_size_threshold), max_points_num_(max_points_num),
-        planer_threshold_(planer_threshold), is_ground_voxel_(false), is_sky_voxel_(false)
+        planer_threshold_(planer_threshold), is_ground_voxel_(false)
   {
     temp_points_.clear();
     octo_state_ = 0;
@@ -201,8 +193,10 @@ public:
     for (int i = 0; i < 8; i++)
     {
       delete leaves_[i];
+      leaves_[i] = nullptr;
     }
     delete plane_ptr_;
+    plane_ptr_ = nullptr;
   }
   void init_plane(const std::vector<pointWithVar> &points, VoxelPlane *plane);
   void init_octo_tree();
@@ -249,10 +243,13 @@ public:
   std::vector<pointWithVar> pv_list_;
   std::vector<PointToPlane> ptpl_effective_list_;
   std::vector<PointToPlane> ptpl_ineffective_list_;
-
+  
   // 高程方向配置
   int elevation_axis_index_;  // 0=x, 1=y, 2=z
   double elevation_multiplier_; // 1.0 or -1.0
+
+  // 邻域体素偏移量查询表 (8邻域)
+  std::vector<std::pair<int, int>> horizontal_neighbor_offsets_;
 
   VoxelMapManager(VoxelMapConfig &config_setting, std::unordered_map<VOXEL_LOCATION, VoxelOctoTree *> &voxel_map)
       : config_setting_(config_setting), voxel_map_(voxel_map)
@@ -286,6 +283,9 @@ public:
       elevation_axis_index_ = 2;
       elevation_multiplier_ = 1.0;
     }
+
+    // 初始化水平面8邻域偏移量查询表
+    initHorizontalNeighborOffsets();
   };
 
   void StateEstimation(StatesGroup &state_propagat);
@@ -308,6 +308,9 @@ public:
   void clearMemOutOfMap(const int& x_max,const int& x_min,const int& y_max,const int& y_min,const int& z_max,const int& z_min );
 
 private:
+  // 初始化水平面邻域偏移量查询表
+  void initHorizontalNeighborOffsets();
+
   // 根据高程方向计算柱的位置
   VOXEL_COLUMN_LOCATION GetColumnLocation(const VOXEL_LOCATION &position) const;
 

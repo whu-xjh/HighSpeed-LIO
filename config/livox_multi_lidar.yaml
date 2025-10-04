@@ -1,7 +1,7 @@
 common:
   img_topic: "/left_camera/image"
   lid_topic: "/livox/multi_lidar"  # 使用合并后的LiDAR话题
-  imu_topic: "/livox/imu_192_168_1_159"  # 默认使用159的IMU
+  imu_topic: "/livox/imu_192_168_1_159"  # 默认使用159的IMU\
   img_en: 0
   lidar_en: 1
   ros_driver_bug_fix: false
@@ -50,7 +50,7 @@ imu:
 
 # 激光雷达里程计
 lio:
-  max_iterations: 10
+  max_iterations: 5
   dept_err: 0.02
   beam_err: 0.05
   min_eigen_value: 0.0025 # 0.005
@@ -58,8 +58,7 @@ lio:
   max_layer: 2
   max_points_num: 50
   layer_init_num: [5, 5, 5, 5, 5]
-  sigma_num: 4
-  sky_voxel_distance_threshold: 10.0
+  sigma_num: 3
 
 local_map:
   map_sliding_en: true

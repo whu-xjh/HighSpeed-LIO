@@ -22,6 +22,12 @@ catkin_clean
 catkin_make
 ```
 
+### Build Specific Package
+```bash
+cd ~/catkin_ws
+catkin_make fast_livo
+```
+
 ## Running the System
 
 ### Basic Usage
@@ -94,6 +100,11 @@ rosbag play YOUR_DOWNLOADED.bag
 - Each point is transformed to common reference frame using corresponding IMU state
 - Essential for high-speed scenarios where motion occurs during LiDAR scan
 
+**Ground Voxel Detection Optimization:**
+- `hasAdjacentGroundVoxel` function uses precomputed lookup table for 8-neighbor horizontal offsets
+- Elevation axis is determined at initialization and reused for efficient neighbor calculation
+- Eliminates runtime loop calculations for neighbor position computation
+
 ### Dependencies
 
 **Required ROS Packages:**
@@ -157,10 +168,15 @@ rosbag play YOUR_DOWNLOADED.bag
 - `ImuData` - IMU measurements with timestamps
 - `ImageFrame` - Visual frames with features and pose
 - `VOXEL_LOCATION` - Discrete 3D voxel coordinates in grid-based map
+- `VOXEL_COLUMN_LOCATION` - 2D horizontal coordinates for column-based voxel management
+- `pointWithVar` - Point with variance information (108 bytes, exceeds cache line)
+- `StatesGroup` - 19-dimensional state vector for EKF
 
 ### Important Constants
 - `DIM_STATE`: 19-dimensional state vector for EKF
 - `G_m_s2`: Gravity constant (9.81 m/s²)
+- `VOXELMAP_HASH_P`: Hash prime for voxel location hashing (116101)
+- `VOXELMAP_MAX_N`: Maximum hash value for voxel locations (10000000000)
 - `ROOT_DIR`: Project root directory defined at compile time
 - Build type defaults to Release for performance
 
@@ -178,3 +194,5 @@ rosbag play YOUR_DOWNLOADED.bag
 - For high-speed scenarios, enable `imu_rate_odom: true`
 - Ensure sufficient memory for voxel map operations
 - Monitor CPU usage - system is computationally intensive
+- Elevation axis configuration (`elevation_axis_` parameter) affects ground voxel detection performance
+- Hash function performance may degrade with highly clustered voxel distributions

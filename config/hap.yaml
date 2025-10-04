@@ -21,7 +21,7 @@ time_offset:
 
 preprocess:
   point_filter_num: 1
-  filter_size_surf: 0.5
+  filter_size_surf: 0.1
   lidar_type: 1 # Livox Avia LiDAR
   scan_line: 6 # Avia: 6, Mid360: 4
   blind: 0.8
@@ -50,7 +50,7 @@ imu:
 
 # 激光雷达里程计
 lio:
-  max_iterations: 20
+  max_iterations: 5
   dept_err: 0.02
   beam_err: 0.05
   min_eigen_value: 0.0025 # 0.005
@@ -58,8 +58,7 @@ lio:
   max_layer: 2
   max_points_num: 50
   layer_init_num: [5, 5, 5, 5, 5]
-  sigma_num: 4
-  sky_voxel_distance_threshold: 3.0
+  sigma_num: 3
 
 local_map:
   map_sliding_en: true
