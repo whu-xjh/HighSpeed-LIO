@@ -1,7 +1,8 @@
 common:
   img_topic: "/left_camera/image"
   lid_topic: "/livox/multi_lidar"  # 使用合并后的LiDAR话题
-  imu_topic: "/livox/imu_192_168_1_159"  # 默认使用159的IMU\
+  imu_topic: "/livox/imu_192_168_1_159"  # 默认使用159的IMU
+  external_imu_topic: "/novatel/oem7/odom"  # 如果有外置IMU，可以在这里设置话题
   img_en: 0
   lidar_en: 1
   ros_driver_bug_fix: false
@@ -92,3 +93,6 @@ lidar_save:
   # how many LiDAR frames saved in each pcd file;
   # -1 : all frames will be saved in ONE pcd file, may lead to memory crash when having too much frames.
 
+external_imu:
+  enable: true
+  weight: 0.5  # 外置IMU权重(0-1)
