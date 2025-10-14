@@ -137,6 +137,13 @@ void LIVMapper::readParameters(ros::NodeHandle &nh)
   nh.param<bool>("publish/dense_map_en", dense_map_en, false);
   nh.param<bool>("publish/pub_cloud_body", publish_cloud_body, false);
 
+  // 读取外置IMU参数
+  nh.param<string>("common/external_imu_topic", external_imu_topic, "/novatel/oem7/odom");
+  nh.param<bool>("external_imu/enable", external_imu_enable, false);
+  nh.param<double>("external_imu/weight", external_imu_weight, 0.5);
+  nh.param<double>("external_imu/time_offset", external_imu_time_offset, 0.0);
+  nh.param<int>("external_imu/buffer_size", external_imu_buffer_size, 1000);
+
   p_pre->blind_sqr = p_pre->blind * p_pre->blind;
 }
 
@@ -169,7 +176,6 @@ void LIVMapper::initializeComponents()
   vio_manager->exposure_estimate_en = exposure_estimate_en;
   vio_manager->colmap_output_en = colmap_output_en;
   vio_manager->initializeVIO();
-
   
   p_imu->set_extrinsic(extT, extR);
   p_imu->set_gyr_cov_scale(V3D(gyr_cov, gyr_cov, gyr_cov));
@@ -242,7 +248,9 @@ void LIVMapper::initializeSubscribersAndPublishers(ros::NodeHandle &nh, image_tr
             nh.subscribe(lid_topic, 200000, &LIVMapper::standard_pcl_cbk, this);
   sub_imu = nh.subscribe(imu_topic, 200000, &LIVMapper::imu_cbk, this);
   sub_img = nh.subscribe(img_topic, 200000, &LIVMapper::img_cbk, this);
-
+  if (external_imu_enable) {
+      sub_external_imu = nh.subscribe(external_imu_topic, 200000, &LIVMapper::odom_cbk, this);
+  }
     
   pubLaserCloudFullRes = nh.advertise<sensor_msgs::PointCloud2>("/cloud_registered", 100);
   pubLaserCloudBody = nh.advertise<sensor_msgs::PointCloud2>("/cloud_body", 100);
@@ -297,7 +305,7 @@ void LIVMapper::processImu()
 {
   // double t0 = omp_get_wtime();
 
-  p_imu->Process2(LidarMeasures, _state, feats_undistort); // 调用IMU处理模块
+  p_imu->Process2(LidarMeasures, _state, feats_undistort, external_imu_buffer, external_imu_weight); // 调用IMU处理模块，传入external IMU buffer和权重
 
   if (gravity_align_en) gravityAlignment();
 
@@ -939,7 +947,6 @@ void LIVMapper::livox_pcl_cbk(const livox_ros_driver::CustomMsg::ConstPtr &msg_i
 void LIVMapper::imu_cbk(const sensor_msgs::Imu::ConstPtr &msg_in)
 {
   if (!imu_en) return;
-
   
   if (last_timestamp_lidar < 0.0) return;
   // ROS_INFO("get imu at time: %.6f", msg_in->header.stamp.toSec());
@@ -990,13 +997,83 @@ void LIVMapper::imu_cbk(const sensor_msgs::Imu::ConstPtr &msg_in)
   sig_buffer.notify_all();
 }
 
+void LIVMapper::odom_cbk(const nav_msgs::Odometry::ConstPtr &msg_in)
+{
+    if (!external_imu_enable) return;
+    
+    mtx_buffer.lock();
+    
+    double timestamp = msg_in->header.stamp.toSec() + external_imu_time_offset;
+    
+    // 检查时间戳是否有效
+    if (timestamp < last_timestamp_lidar) {
+        mtx_buffer.unlock();
+        return;
+    }
+    
+    // 创建外置IMU数据结构
+    ExternalIMUData external_data;
+    external_data.timestamp = timestamp;
+    external_data.is_valid = true;
+    
+    // 提取位置信息
+    external_data.position << msg_in->pose.pose.position.x,
+                             msg_in->pose.pose.position.y,
+                             msg_in->pose.pose.position.z;
+
+    // 提取线速度信息
+    external_data.linear_velocity << msg_in->twist.twist.linear.x,
+                                   msg_in->twist.twist.linear.y,
+                                   msg_in->twist.twist.linear.z;
+
+    // 提取线速度协方差信息
+    // nav_msgs Odometry的twist.covariance是36个元素的数组，按行优先排列
+    // 线速度协方差对应位置 [0], [7], [14]
+    external_data.velocity_covariance << msg_in->twist.covariance[0],    // x速度方差
+                                          msg_in->twist.covariance[7],    // y速度方差  
+                                          msg_in->twist.covariance[14];   // z速度方差
+
+    // 提取姿态信息（四元数转旋转矩阵）
+    Eigen::Quaterniond q(msg_in->pose.pose.orientation.w,
+                         msg_in->pose.pose.orientation.x,
+                         msg_in->pose.pose.orientation.y,
+                         msg_in->pose.pose.orientation.z);
+
+    // 坐标变换矩阵
+    M3D R_external_to_internal;
+    R_external_to_internal << 0, 0, 1,    // 内置X = 外置Z
+                            1, 0,  0,     // 内置Y = 外置X  
+                            0, 1, 0;     // 内置Z = 外置Y
+    
+    external_data.linear_velocity = R_external_to_internal * external_data.linear_velocity;
+    
+    // 对速度协方差进行坐标变换
+    // 协方差变换公式: C_internal = R * C_external * R^T
+    // 对于对角协方差矩阵，需要完整的3x3变换
+    Eigen::Matrix3d external_cov_matrix = Eigen::Matrix3d::Zero();
+    external_cov_matrix.diagonal() = external_data.velocity_covariance;
+    Eigen::Matrix3d internal_cov_matrix = R_external_to_internal * external_cov_matrix * R_external_to_internal.transpose();
+    external_data.velocity_covariance = internal_cov_matrix.diagonal();
+
+    last_external_imu_time = timestamp;
+    latest_external_imu = external_data;
+    
+    // 添加到buffer并管理buffer大小
+    external_imu_buffer.push_back(external_data);
+    if (external_imu_buffer.size() > external_imu_buffer_size) {
+      external_imu_buffer.pop_front();
+    }
+    
+    mtx_buffer.unlock();
+    sig_buffer.notify_all();
+}
+
 cv::Mat LIVMapper::getImageFromMsg(const sensor_msgs::ImageConstPtr &img_msg)
 {
   cv::Mat img;
   img = cv_bridge::toCvCopy(img_msg, "bgr8")->image;
   return img;
 }
-
 
 void LIVMapper::img_cbk(const sensor_msgs::ImageConstPtr &msg_in)
 {
@@ -1770,43 +1847,4 @@ void LIVMapper::queueLazSaveTask(const std::string& filename, std::function<void
   laz_queue_cv_.notify_one();
 
   std::cout << CYAN << "Queued LAZ save task: " << filename << " (queue size: " << laz_save_queue_.size() << ")" << RESET << std::endl;
-}
-
-void LIVMapper::extractGroundPoints(const PointCloudXYZI::Ptr& input_cloud, PointCloudXYZI::Ptr& ground_points)
-{
-  if (input_cloud->empty() || voxelmap_manager == nullptr) {
-    return;
-  }
-
-  ground_points->clear();
-  ground_points->reserve(input_cloud->size());
-
-  // 获取体素大小
-  double voxel_size = voxelmap_manager->config_setting_.max_voxel_size_;
-
-  // 遍历输入点云中的每个点（直接使用原始坐标系，无需转换）
-  for (const auto& point : input_cloud->points) {
-    // 计算点所在的体素位置（直接使用原始坐标）
-    VOXEL_LOCATION voxel_loc(
-      static_cast<int64_t>(floor(point.x / voxel_size)),
-      static_cast<int64_t>(floor(point.y / voxel_size)),
-      static_cast<int64_t>(floor(point.z / voxel_size))
-    );
-
-    // 在voxelmap_manager中查找对应的体素
-    if (voxelmap_manager != nullptr) {
-      auto it = voxelmap_manager->voxel_map_.find(voxel_loc);
-      if (it != voxelmap_manager->voxel_map_.end()) {
-        // 检查该体素是否为地面体素
-        VoxelOctoTree* voxel = it->second;
-        if (voxel != nullptr && voxel->is_ground_voxel_) {
-          // 如果是地面体素，则将该点添加到地面点集合中
-          ground_points->points.push_back(point);
-        }
-      }
-    }
-  }
-
-  ground_points->width = ground_points->points.size();
-  ground_points->height = 1;
 }

@@ -124,6 +124,18 @@ typedef struct pointWithVar
   };
 } pointWithVar;
 
+// External IMU data structure
+struct ExternalIMUData{
+  double timestamp;
+  V3D position;
+  V3D linear_velocity;
+  V3D orientation;
+  V3D velocity_covariance;  // Velocity covariance (x, y, z variances)
+  bool is_valid;
+  
+  ExternalIMUData() : timestamp(0.0), position(V3D::Zero()), linear_velocity(V3D::Zero()), 
+                      orientation(V3D::Zero()), velocity_covariance(V3D::Zero()), is_valid(false) {}
+};
 
 struct StatesGroup
 {

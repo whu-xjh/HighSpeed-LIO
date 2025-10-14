@@ -11,6 +11,7 @@ which is included as part of this source code package.
 */
 
 #include "IMU_Processing.h"
+#include <iomanip>
 
 ImuProcess::ImuProcess() : Eye3d(M3D::Identity()),
                            Zero3d(0, 0, 0), b_first_frame(true), imu_need_init(true)
@@ -233,8 +234,103 @@ void ImuProcess::Forward_without_imu(LidarMeasureGroup &meas, StatesGroup &state
   }
 }
 
+pair<ExternalIMUData, ExternalIMUData> ImuProcess::findClosestExternalIMUs(deque<ExternalIMUData> &external_imu_buffer, double target_time, double max_time_diff)
+{
+  ExternalIMUData prev_imu, next_imu;
+  prev_imu.is_valid = false;
+  next_imu.is_valid = false;
+  
+  if (external_imu_buffer.empty()) {
+    return make_pair(prev_imu, next_imu);
+  }
+  
+  // Find the two closest IMU data points (one before, one after target time)
+  while (!external_imu_buffer.empty()) {
+    const auto &imu_data = external_imu_buffer.front();
+    
+    if (imu_data.timestamp <= target_time) {
+      // IMU data is before or at target time
+      if (!prev_imu.is_valid || imu_data.timestamp > prev_imu.timestamp) {
+        prev_imu = imu_data;
+        prev_imu.is_valid = true;
+      }
+    } else {
+      // IMU data is after target time
+      if (!next_imu.is_valid || imu_data.timestamp < next_imu.timestamp) {
+        next_imu = imu_data;
+        next_imu.is_valid = true;
+      }
+    }
+    
+    // Remove processed data to prevent accumulation
+    external_imu_buffer.pop_front();
+    
+    // If we've found both prev and next IMU data, we can stop
+    if (prev_imu.is_valid && next_imu.is_valid) {
+      break;
+    }
 
-void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_inout, PointCloudXYZI &pcl_out)
+  }
+  
+  // No time difference validation needed - we accept any available IMU data for interpolation
+
+  return make_pair(prev_imu, next_imu);
+}
+
+ExternalIMUData ImuProcess::interpolateExternalIMU(const ExternalIMUData &prev_imu, const ExternalIMUData &next_imu, double target_time)
+{
+  ExternalIMUData interpolated_imu;
+  interpolated_imu.is_valid = false;
+  
+  if (!prev_imu.is_valid && !next_imu.is_valid) {
+    return interpolated_imu;
+  }
+  
+  if (!prev_imu.is_valid) {
+    // Only next IMU is available
+    interpolated_imu = next_imu;
+    interpolated_imu.is_valid = true;
+    return interpolated_imu;
+  }
+  
+  if (!next_imu.is_valid) {
+    // Only prev IMU is available
+    interpolated_imu = prev_imu;
+    interpolated_imu.is_valid = true;
+    return interpolated_imu;
+  }
+  
+  // Both prev and next are available, perform linear interpolation
+  double total_time = next_imu.timestamp - prev_imu.timestamp;
+  if (total_time <= 0) {
+    // Invalid time interval, use prev IMU
+    interpolated_imu = prev_imu;
+    interpolated_imu.is_valid = true;
+    return interpolated_imu;
+  }
+  
+  double alpha = (target_time - prev_imu.timestamp) / total_time;
+  alpha = std::max(0.0, std::min(1.0, alpha)); // Clamp to [0, 1]
+  
+  // Linear interpolation for position
+  interpolated_imu.position = (1.0 - alpha) * prev_imu.position + alpha * next_imu.position;
+  
+  // Linear interpolation for linear velocity
+  interpolated_imu.linear_velocity = (1.0 - alpha) * prev_imu.linear_velocity + alpha * next_imu.linear_velocity;
+  
+  // Linear interpolation for orientation (assuming Euler angles)
+  interpolated_imu.orientation = (1.0 - alpha) * prev_imu.orientation + alpha * next_imu.orientation;
+  
+  // Linear interpolation for velocity covariance
+  interpolated_imu.velocity_covariance = (1.0 - alpha) * prev_imu.velocity_covariance + alpha * next_imu.velocity_covariance;
+  
+  interpolated_imu.timestamp = target_time;
+  interpolated_imu.is_valid = true;
+  
+  return interpolated_imu;
+}
+
+void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_inout, PointCloudXYZI &pcl_out, deque<ExternalIMUData> external_imu_buffer, double external_imu_weight)
 {
   double t0 = omp_get_wtime();
   pcl_out.clear();
@@ -445,7 +541,33 @@ void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_
     break;
   }
 
-  state_inout.vel_end = vel_imu;
+  // 寻找时间最近的前后两个external IMU数据并进行插值
+  auto external_imus = findClosestExternalIMUs(external_imu_buffer, prop_end_time, 0.1);  // Use large time window
+  ExternalIMUData interpolated_external_imu = interpolateExternalIMU(external_imus.first, external_imus.second, prop_end_time);
+
+  // std::cout << std::fixed << std::setprecision(9);
+  // std::cout << "[ Preprocess ] External imu first velocity: [" << external_imus.first.linear_velocity.transpose() << "]" << std::endl;
+  // std::cout << "[ Preprocess ] External imu second velocity: [" << external_imus.second.linear_velocity.transpose() << "]" << std::endl;
+  // std::cout << "[ Preprocess ] External imu first covariance: [" << external_imus.first.velocity_covariance.transpose() << "]" << std::endl;
+  // std::cout << "[ Preprocess ] External imu second covariance: [" << external_imus.second.velocity_covariance.transpose() << "]" << std::endl;
+
+  if (interpolated_external_imu.is_valid) {
+    double time_diff = std::abs(prop_end_time - interpolated_external_imu.timestamp);
+    V3D external_velocity_transformed = R_imu * interpolated_external_imu.linear_velocity;
+    state_inout.vel_end = (1 - external_imu_weight) * vel_imu + external_imu_weight * external_velocity_transformed;
+
+    std::cout << std::fixed << std::setprecision(6);
+    // std::cout << "[ Preprocess ] Internal IMU time: " << prop_end_time << "s" << std::endl;
+    // std::cout << "[ Preprocess ] Interpolated IMU time: " << interpolated_external_imu.timestamp << "s" << std::endl;
+    std::cout << "[ Preprocess ] Internal velocity: [" << vel_imu.transpose() << "]" << std::endl;
+    std::cout << "[ Preprocess ] External velocity: [" << external_velocity_transformed.transpose() << "]" << std::endl;
+    // std::cout << "[ Preprocess ] Internal covariance: [" << state_inout.cov.block<3, 3>(7, 7).diagonal().transpose() << "]" << std::endl;
+    // std::cout << "[ Preprocess ] External covariance: [" << interpolated_external_imu.velocity_covariance.transpose() << "]" << std::endl;
+
+  } else {
+    std::cout << "No valid external IMU data found, using internal IMU only" << std::endl;
+    state_inout.vel_end = vel_imu;
+  }
   state_inout.rot_end = R_imu;
   state_inout.pos_end = pos_imu;
   state_inout.inv_expo_time = tau;
@@ -559,7 +681,7 @@ void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_
   // printf("[ IMU ] time forward: %lf, backward: %lf.\n", t1 - t0, omp_get_wtime() - t1);
 }
 
-void ImuProcess::Process2(LidarMeasureGroup &lidar_meas, StatesGroup &stat, PointCloudXYZI::Ptr cur_pcl_un_)
+void ImuProcess::Process2(LidarMeasureGroup &lidar_meas, StatesGroup &stat, PointCloudXYZI::Ptr cur_pcl_un_, deque<ExternalIMUData> external_imu_buffer, double external_imu_weight)
 {
   double t1, t2, t3;
   t1 = omp_get_wtime();
@@ -604,6 +726,6 @@ void ImuProcess::Process2(LidarMeasureGroup &lidar_meas, StatesGroup &stat, Poin
   }
 
   // 去畸变点云核心函数
-  UndistortPcl(lidar_meas, stat, *cur_pcl_un_);
+  UndistortPcl(lidar_meas, stat, *cur_pcl_un_, external_imu_buffer, external_imu_weight);
   // cout << "[ IMU ] undistorted point num: " << cur_pcl_un_->size() << endl;
 }

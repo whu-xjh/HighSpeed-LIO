@@ -43,6 +43,19 @@ public:
       : filename(fname), save_function(func) {}
   };
   
+  // 外置IMU相关变量
+  ExternalIMUData latest_external_imu;
+  deque<ExternalIMUData> external_imu_buffer;
+  double external_imu_weight = 0.5;
+  bool external_imu_enable = false;
+  double external_imu_time_offset = 0.0;
+  double last_external_imu_time = -1.0;
+  int external_imu_buffer_size = 1000;
+  ros::Subscriber sub_external_imu;
+  string external_imu_topic;
+  void odom_cbk(const nav_msgs::Odometry::ConstPtr &msg_in);
+  void cleanExternalIMUBuffer(double current_time);
+
   void lazSaveWorker();
   void queueLazSaveTask(const std::string& filename, std::function<void()> save_function);
   void initializeSubscribersAndPublishers(ros::NodeHandle &nh, image_transport::ImageTransport &it);
@@ -70,13 +83,11 @@ public:
   void livox_pcl_cbk(const livox_ros_driver::CustomMsg::ConstPtr &msg_in);
   void imu_cbk(const sensor_msgs::Imu::ConstPtr &msg_in);
   void img_cbk(const sensor_msgs::ImageConstPtr &msg_in);
-  void odom_cbk(const nav_msgs::Odometry::ConstPtr &msg_in);
   void publish_img_rgb(const image_transport::Publisher &pubImage, VIOManagerPtr vio_manager);
   void publish_frame_world(const ros::Publisher &pubLaserCloudFullRes, VIOManagerPtr vio_manager = nullptr);
   void save_frame_world(const std::vector<PointToPlane> &ptpl_list);
   void save_frame_world_RGB(PointCloudXYZRGB::Ptr &laserCloudWorldRGB);
   void publish_frame_body(const ros::Publisher &pubLaserCloudBody);
-  void extractGroundPoints(const PointCloudXYZI::Ptr& input_cloud, PointCloudXYZI::Ptr& ground_points);
 
   void publish_visual_sub_map(const ros::Publisher &pubSubVisualMap);
   void publish_effective_world(const ros::Publisher &pubLaserCloudEffective, const std::vector<PointToPlane> &ptpl_list);
@@ -190,7 +201,6 @@ public:
   ImuProcessPtr p_imu;
   VoxelMapManagerPtr voxelmap_manager;
   VIOManagerPtr vio_manager;
-
   
   ros::Publisher plane_pub;
   ros::Publisher voxel_pub;

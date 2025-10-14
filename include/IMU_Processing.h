@@ -45,8 +45,10 @@ public:
   void disable_gravity_est();
   void disable_bias_est();
   void disable_exposure_est();
-  void Process2(LidarMeasureGroup &lidar_meas, StatesGroup &stat, PointCloudXYZI::Ptr cur_pcl_un_);
-  void UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_inout, PointCloudXYZI &pcl_out);
+  void Process2(LidarMeasureGroup &lidar_meas, StatesGroup &stat, PointCloudXYZI::Ptr cur_pcl_un_, deque<ExternalIMUData> external_imu_buffer = deque<ExternalIMUData>(), double external_imu_weight = 0.5);
+  void UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_inout, PointCloudXYZI &pcl_out, deque<ExternalIMUData> external_imu_buffer, double external_imu_weight = 0.5);
+  pair<ExternalIMUData, ExternalIMUData> findClosestExternalIMUs(deque<ExternalIMUData> &external_imu_buffer, double target_time, double max_time_diff = 0.1);
+  ExternalIMUData interpolateExternalIMU(const ExternalIMUData &prev_imu, const ExternalIMUData &next_imu, double target_time);
 
   ofstream fout_imu;
   double IMU_mean_acc_norm;
