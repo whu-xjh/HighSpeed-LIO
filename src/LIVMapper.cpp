@@ -1041,12 +1041,12 @@ void LIVMapper::odom_cbk(const nav_msgs::Odometry::ConstPtr &msg_in)
 
     // 坐标变换矩阵
     M3D R_external_to_internal;
-    R_external_to_internal << 0, 0, 1,    // 内置X = 外置Z
+    R_external_to_internal << 0, 0, -1,    // 内置X = 外置-Z
                             1, 0,  0,     // 内置Y = 外置X  
-                            0, 1, 0;     // 内置Z = 外置Y
+                            0, -1, 0;     // 内置Z = 外置-Y
     
     external_data.linear_velocity = R_external_to_internal * external_data.linear_velocity;
-    
+
     // 对速度协方差进行坐标变换
     // 协方差变换公式: C_internal = R * C_external * R^T
     // 对于对角协方差矩阵，需要完整的3x3变换

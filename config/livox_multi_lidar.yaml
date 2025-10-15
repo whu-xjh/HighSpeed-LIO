@@ -21,8 +21,8 @@ time_offset:
   exposure_time_init: 0.0
 
 preprocess:
-  point_filter_num: 1 
-  filter_size_surf: 0.5 # 体素滤波大小
+  point_filter_num: 2 
+  filter_size_surf: 0.25 # 体素滤波大小
   lidar_type: 1 # Livox Avia LiDAR
   scan_line: 6 # Avia: 6, Mid360: 4
   blind: 0.8
@@ -57,14 +57,14 @@ lio:
   min_eigen_value: 0.0025 # 0.005
   voxel_size: 1 # 体素底图尺寸
   max_layer: 2
-  max_points_num: 50
-  layer_init_num: [5, 5, 5, 5, 5]
-  sigma_num: 3
+  max_points_num: 64
+  layer_init_num: [3, 3, 3, 3, 3]
+  sigma_num: 4
 
 local_map:
   map_sliding_en: true
   half_map_size: 1000
-  sliding_thresh: 10
+  sliding_thresh: 20
 
 uav:
   imu_rate_odom: true
@@ -96,7 +96,7 @@ lidar_save:
 external_imu:
   enable: true  # 是否启用外置IMU
   weight: 1  # 外置IMU权重(0-1)
-  time_offset: 0.0  # 外置IMU时间偏移(秒)
+  time_offset: 0  # 外置IMU时间偏移(秒)
   buffer_size: 100000  # external IMU buffer大小
   external_R : [1, 0, 0, 0, 1, 0, 0, 0, 1]
   external_T : [0, 0, 0]

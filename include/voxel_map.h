@@ -46,13 +46,12 @@ typedef struct VoxelMapConfig
   double beam_err_;
   double dept_err_;
   double sigma_num_;
-  bool is_pub_plane_map_;
+  bool is_pub_plane_map_; 
 
   // config of local map sliding
   double sliding_thresh;
   bool map_sliding_en;
   int half_map_size;
-
   
   // config for elevation axis specification
   std::string elevation_axis_;
@@ -170,6 +169,7 @@ public:
   bool init_octo_;
   bool update_enable_;
   bool is_ground_voxel_ = false;
+  bool is_sky_voxel_ = false;
 
   VoxelOctoTree(int max_layer, int layer, int points_size_threshold, int max_points_num, float planer_threshold)
       : max_layer_(max_layer), layer_(layer), points_size_threshold_(points_size_threshold), max_points_num_(max_points_num),

@@ -545,20 +545,24 @@ void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_
   auto external_imus = findClosestExternalIMUs(external_imu_buffer, prop_end_time, 0.1);  // Use large time window
   ExternalIMUData interpolated_external_imu = interpolateExternalIMU(external_imus.first, external_imus.second, prop_end_time);
 
-  // std::cout << std::fixed << std::setprecision(9);
-  // std::cout << "[ Preprocess ] External imu first velocity: [" << external_imus.first.linear_velocity.transpose() << "]" << std::endl;
-  // std::cout << "[ Preprocess ] External imu second velocity: [" << external_imus.second.linear_velocity.transpose() << "]" << std::endl;
-  // std::cout << "[ Preprocess ] External imu first covariance: [" << external_imus.first.velocity_covariance.transpose() << "]" << std::endl;
-  // std::cout << "[ Preprocess ] External imu second covariance: [" << external_imus.second.velocity_covariance.transpose() << "]" << std::endl;
-
   if (interpolated_external_imu.is_valid) {
     double time_diff = std::abs(prop_end_time - interpolated_external_imu.timestamp);
     V3D external_velocity_transformed = R_imu * interpolated_external_imu.linear_velocity;
+
+    double internal_velocity_cov = state_inout.cov.block<3, 3>(7, 7).diagonal().sum(); 
+    double external_velocity_cov = interpolated_external_imu.velocity_covariance.sum();
+    // 使用协方差的倒数，外部协方差越大，其倒数越小，权重越小
+    double internal_inv = 1.0 / (internal_velocity_cov + 1e-6); // 加小值防止除零
+    double external_inv = 1.0 / (external_velocity_cov + 1e-6);
+    external_imu_weight = external_inv / (internal_inv + external_inv);
     state_inout.vel_end = (1 - external_imu_weight) * vel_imu + external_imu_weight * external_velocity_transformed;
 
     std::cout << std::fixed << std::setprecision(6);
-    // std::cout << "[ Preprocess ] Internal IMU time: " << prop_end_time << "s" << std::endl;
-    // std::cout << "[ Preprocess ] Interpolated IMU time: " << interpolated_external_imu.timestamp << "s" << std::endl;
+    // std::cout << "[ Preprocess ] External imu first velocity: [" << external_imus.first.linear_velocity.transpose() << "]" << std::endl;
+    // std::cout << "[ Preprocess ] External imu second velocity: [" << external_imus.second.linear_velocity.transpose() << "]" << std::endl;
+    // std::cout << "[ Preprocess ] External imu first covariance: [" << external_imus.first.velocity_covariance.transpose() << "]" << std::endl;
+    // std::cout << "[ Preprocess ] External imu second covariance: [" << external_imus.second.velocity_covariance.transpose() << "]" << std::endl;
+    std::cout << "[ Preprocess ] External IMU weight: " << external_imu_weight << std::endl;
     std::cout << "[ Preprocess ] Internal velocity: [" << vel_imu.transpose() << "]" << std::endl;
     std::cout << "[ Preprocess ] External velocity: [" << external_velocity_transformed.transpose() << "]" << std::endl;
     // std::cout << "[ Preprocess ] Internal covariance: [" << state_inout.cov.block<3, 3>(7, 7).diagonal().transpose() << "]" << std::endl;

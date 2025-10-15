@@ -691,6 +691,7 @@ void VoxelMapManager::UpdateGroundFlagForColumn(const VOXEL_COLUMN_LOCATION &col
   for (auto &voxel_pair : column_voxels)
   {
     voxel_pair.second->is_ground_voxel_ = false;
+    voxel_pair.second->is_sky_voxel_ = false; 
   }
 
   // 只有当柱子中有多于一个体素时，才进行地面体素标记
@@ -707,6 +708,16 @@ void VoxelMapManager::UpdateGroundFlagForColumn(const VOXEL_COLUMN_LOCATION &col
       }
     }
     bottom_voxel->is_ground_voxel_ = true;
+
+    // 标记天空体素：比地面体素高4米以上的体素
+    double ground_height = bottom_voxel->voxel_center_[elevation_axis_index_] * elevation_multiplier_;
+    for (auto &voxel_pair : column_voxels)
+    {
+      double current_height = voxel_pair.second->voxel_center_[elevation_axis_index_] * elevation_multiplier_;
+      if (current_height - ground_height > 4.0) {
+        voxel_pair.second->is_sky_voxel_ = true;
+      }
+    }
   }
   else {// 对于单个体素的情况
     auto single_voxel = column_voxels.begin()->second;
@@ -989,8 +1000,8 @@ void VoxelMapManager::BuildResidualListOMP(std::vector<pointWithVar> &pv_list, s
         if (iter_near != voxel_map_.end()) { build_single_residual(pv, iter_near->second, 0, is_sucess, prob, single_ptpl); }
       }
 
-      if (current_octo->is_ground_voxel_ || hasAdjacentGroundVoxel(current_octo, position) > 0)
-      {
+      if (current_octo->is_ground_voxel_ || hasAdjacentGroundVoxel(current_octo, position) > 0 || current_octo->is_sky_voxel_)
+      { // 如果当前体素是地面体素或相邻体素中有地面体素,则忽略该点
         ignored_ptpl[i] = true;
       }
 
@@ -1019,9 +1030,8 @@ void VoxelMapManager::build_single_residual(pointWithVar &pv, const VoxelOctoTre
 {
   int max_layer = config_setting_.max_layer_;
   double sigma_num = config_setting_.sigma_num_;
-  int voxel_multi = int(config_setting_.max_voxel_size_ / 0.5 + 0.5);
 
-  double radius_k = 3 * voxel_multi;
+  double radius_k = 3.0;
   Eigen::Vector3d p_w = pv.point_w;
   if (current_octo->plane_ptr_->is_plane_) //检查当前体素内是否包含有效平面
   {
@@ -1306,7 +1316,7 @@ int VoxelMapManager::hasAdjacentGroundVoxel(VoxelOctoTree *current_octo, const V
     auto iter = voxel_map_.find(adjacent_pos);
     if (iter != voxel_map_.end()) {
       VoxelOctoTree *adjacent_voxel = iter->second;
-      if (adjacent_voxel != nullptr && adjacent_voxel->is_ground_voxel_) {
+      if (adjacent_voxel != nullptr && (adjacent_voxel->is_ground_voxel_ || adjacent_voxel->is_sky_voxel_)) {
         adjacent_ground_count++;
       }
     }
