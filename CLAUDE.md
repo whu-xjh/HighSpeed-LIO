@@ -28,6 +28,21 @@ cd ~/catkin_ws
 catkin_make fast_livo
 ```
 
+### Build from Project Root
+```bash
+cd ~/catkin_ws/src/FAST-LIVO2
+mkdir -p build && cd build
+cmake ..
+make -j$(nproc)
+```
+
+### Architecture-Specific Notes
+- **ARM (32-bit)**: Uses `-O3 -mcpu=native -mtune=native -mfpu=neon -ffast-math`
+- **ARM64 (RK3588, Jetson)**: Uses `-O3 -mcpu=native -mtune=native -ffast-math`
+- **x86-64**: Uses `-O2 -march=native` (conservative for stability)
+- Multithreading enabled with OpenMP when available
+- Maximum cores detected automatically, configurable via `MP_PROC_NUM`
+
 ## Running the System
 
 ### Basic Usage
@@ -53,7 +68,7 @@ rosbag play YOUR_DOWNLOADED.bag
 ### Core Components
 
 **Main Processing Pipeline:**
-- `LIVMapper.cpp/h` - Main fusion node handling LiDAR-Inertial-Visual odometry (7.2K lines)
+- `LIVMapper.cpp/h` - Main fusion node handling LiDAR-Inertial-Visual odometry (~1.9K lines)
 - `voxel_map.cpp/h` - LiDAR point cloud management and voxel-based mapping
 - `IMU_Processing.cpp/h` - IMU preintegration and bias estimation with Kalman filtering
 - `preprocess.cpp/h` - LiDAR point cloud preprocessing and deskewing with motion compensation
@@ -91,9 +106,9 @@ rosbag play YOUR_DOWNLOADED.bag
 
 **Neighbor Voxel Search Algorithm:**
 - Implements adaptive neighbor voxel selection for robust point cloud registration
-- Uses `voxel_center_ ± quater_length_` for boundary detection
-- Distance-based selection: skips 1 or 2 voxels based on point position relative to voxel boundaries
-- Located in `voxel_map.cpp:782-807` within `BuildResidualListOMP` function
+- Uses `voxel_center_ ± quater_length_` for boundary detection with distance-based skipping
+- Skips 1 or 2 voxels based on point position relative to voxel boundaries for efficient search
+- Located in `voxel_map.cpp` within `BuildResidualListOMP` function around lines 1050-1080
 
 **Motion Distortion Compensation:**
 - Forward propagation in `IMU_Processing.cpp:300` undistorts point clouds using IMU integration
@@ -104,6 +119,14 @@ rosbag play YOUR_DOWNLOADED.bag
 - `hasAdjacentGroundVoxel` function uses precomputed lookup table for 8-neighbor horizontal offsets
 - Elevation axis is determined at initialization and reused for efficient neighbor calculation
 - Eliminates runtime loop calculations for neighbor position computation
+
+**External IMU Support:**
+- System supports external IMU data via `ExternalIMUData` structure defined in `common_lib.h`
+- External IMU measurements buffered with configurable time offset and buffer size
+- Integrated through `external_imu_buffer` with `external_imu_enable` flag
+- Configurable via YAML: `external_imu_topic`, `external_imu/enable`, `external_imu/time_offset`
+- Transformation matrices (`external_imu_T`, `external_imu_R`) for coordinate alignment
+- Located in `LIVMapper.h:46-61` with callback `odom_cbk()` for nav_msgs/Odometry input
 
 ### Dependencies
 
@@ -116,9 +139,16 @@ rosbag play YOUR_DOWNLOADED.bag
 - PCL (>=1.8) - Point cloud processing
 - Eigen3 (>=3.3.4) - Linear algebra
 - OpenCV (>=4.2) - Computer vision
-- Sophus - Lie group operations
+- Sophus - Lie group operations (non-templated/double-only version)
 - Boost - Thread management
 - LAStools - Point cloud compression (specific paths: `/usr/local/include/LASlib`, `/usr/local/lib/liblaszip.so.8`)
+
+**External IMU Integration:**
+- System processes external IMU data through nav_msgs/Odometry messages
+- Supports time synchronization via configurable `external_imu_time_offset` parameter
+- Buffer management with configurable size (default 1000 measurements)
+- Coordinate transformation between external IMU frame and system frame
+- Configurable via YAML parameters under `external_imu/*` and `common/external_imu_topic`
 
 ### Key Configuration Files
 
@@ -134,6 +164,11 @@ rosbag play YOUR_DOWNLOADED.bag
 - `uav/gravity_align_en: false` - Gravity alignment enable
 - `common/extrinsic_T` - LiDAR to IMU translation
 - `common/extrinsic_R` - LiDAR to IMU rotation
+- `common/external_imu_topic` - External IMU odometry topic
+- `external_imu/enable: false` - Enable external IMU data processing
+- `external_imu/time_offset: 0.0` - Time offset for external IMU synchronization
+- `external_imu/external_T` - External IMU to system translation
+- `external_imu/external_R` - External IMU to system rotation
 
 ## Build System Details
 
@@ -171,6 +206,12 @@ rosbag play YOUR_DOWNLOADED.bag
 - `VOXEL_COLUMN_LOCATION` - 2D horizontal coordinates for column-based voxel management
 - `pointWithVar` - Point with variance information (108 bytes, exceeds cache line)
 - `StatesGroup` - 19-dimensional state vector for EKF
+- `ExternalIMUData` - External IMU measurement data structure
+- `LazSaveTask` - Asynchronous point cloud saving task structure
+- `MeasureGroup` - Sensor measurement grouping for LiDAR-IMU-Visual synchronization
+- `LidarMeasureGroup` - Complete LiDAR frame data with associated measurements
+- `VoxelMapConfig` - Configuration parameters for voxel mapping system
+- `PointToPlane` - Point-to-plane residual for ICP optimization
 
 ### Important Constants
 - `DIM_STATE`: 19-dimensional state vector for EKF
@@ -178,6 +219,9 @@ rosbag play YOUR_DOWNLOADED.bag
 - `VOXELMAP_HASH_P`: Hash prime for voxel location hashing (116101)
 - `VOXELMAP_MAX_N`: Maximum hash value for voxel locations (10000000000)
 - `ROOT_DIR`: Project root directory defined at compile time
+- `INIT_COV`: Initial covariance value (0.01)
+- `SIZE_LARGE`: Large buffer size (500)
+- `SIZE_SMALL`: Small buffer size (100)
 - Build type defaults to Release for performance
 
 ## Common Issues
@@ -196,3 +240,7 @@ rosbag play YOUR_DOWNLOADED.bag
 - Monitor CPU usage - system is computationally intensive
 - Elevation axis configuration (`elevation_axis_` parameter) affects ground voxel detection performance
 - Hash function performance may degrade with highly clustered voxel distributions
+- External IMU time synchronization critical for multi-sensor fusion accuracy
+- LAStools library paths must match system installation for point cloud compression
+- External IMU extrinsic parameters (`external_imu/external_T`, `external_imu/external_R`) must be properly calibrated
+- Buffer overflow can occur if `external_imu_buffer_size` is too small for high-frequency external IMU data

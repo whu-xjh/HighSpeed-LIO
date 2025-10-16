@@ -43,7 +43,7 @@ vio:
 # imu参数      
 imu:
   imu_en: true
-  imu_int_frame: 50
+  imu_int_frame: 100
   acc_cov: 0.5 # 0.2
   gyr_cov: 0.3 # 0.5
   b_acc_cov: 0.0001 # 0.1
@@ -95,7 +95,16 @@ lidar_save:
 
 external_imu:
   enable: true  # 是否启用外置IMU
+  weight: 1  # 外置IMU权重(0-1)
   time_offset: 0  # 外置IMU时间偏移(秒)
   buffer_size: 100000  # external IMU buffer大小
-  external_R : [0, 0, -1, 1, 0, 0, 0, -1, 0]
+  external_R : [1, 0, 0, 0, 1, 0, 0, 0, 1]
   external_T : [0, 0, 0]
+
+road02：
+    拯救者：Average Total Time 0.071823
+    209：Average Total Time 0.051262
+
+road03：
+    拯救者：Average Total Time 0.074953
+    209：Average Total Time 0.055361

@@ -46,7 +46,6 @@ public:
   // 外置IMU相关变量
   ExternalIMUData latest_external_imu;
   deque<ExternalIMUData> external_imu_buffer;
-  double external_imu_weight = 0.5;
   bool external_imu_enable = false;
   double external_imu_time_offset = 0.0;
   double last_external_imu_time = -1.0;
@@ -55,6 +54,11 @@ public:
   string external_imu_topic;
   void odom_cbk(const nav_msgs::Odometry::ConstPtr &msg_in);
   void cleanExternalIMUBuffer(double current_time);
+  
+  // 外置IMU外参
+  V3D external_imu_T;
+  M3D external_imu_R;
+  std::vector<double> external_imu_T_vec, external_imu_R_vec;
 
   void lazSaveWorker();
   void queueLazSaveTask(const std::string& filename, std::function<void()> save_function);

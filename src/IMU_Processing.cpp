@@ -330,7 +330,7 @@ ExternalIMUData ImuProcess::interpolateExternalIMU(const ExternalIMUData &prev_i
   return interpolated_imu;
 }
 
-void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_inout, PointCloudXYZI &pcl_out, deque<ExternalIMUData> external_imu_buffer, double external_imu_weight)
+void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_inout, PointCloudXYZI &pcl_out, deque<ExternalIMUData> external_imu_buffer, bool external_imu_enable)
 {
   double t0 = omp_get_wtime();
   pcl_out.clear();
@@ -541,35 +541,44 @@ void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_
     break;
   }
 
-  // 寻找时间最近的前后两个external IMU数据并进行插值
-  auto external_imus = findClosestExternalIMUs(external_imu_buffer, prop_end_time, 0.1);  // Use large time window
-  ExternalIMUData interpolated_external_imu = interpolateExternalIMU(external_imus.first, external_imus.second, prop_end_time);
+  // 处理外置IMU数据
+  if (external_imu_enable) {
+    // 寻找时间最近的前后两个external IMU数据并进行插值
+    auto external_imus = findClosestExternalIMUs(external_imu_buffer, prop_end_time, 0.1);  // Use large time window
+    ExternalIMUData interpolated_external_imu = interpolateExternalIMU(external_imus.first, external_imus.second, prop_end_time);
 
-  if (interpolated_external_imu.is_valid) {
-    double time_diff = std::abs(prop_end_time - interpolated_external_imu.timestamp);
-    V3D external_velocity_transformed = R_imu * interpolated_external_imu.linear_velocity;
+    if (interpolated_external_imu.is_valid) {
+      double time_diff = std::abs(prop_end_time - interpolated_external_imu.timestamp);
+      // 使用外置IMU的外参进行坐标变换
+      // 在实际应用中，external_imu的线性速度应该已经在odom_cbk中转换到内置IMU坐标系
+      V3D external_velocity_transformed = R_imu * interpolated_external_imu.linear_velocity;
 
-    double internal_velocity_cov = state_inout.cov.block<3, 3>(7, 7).diagonal().sum(); 
-    double external_velocity_cov = interpolated_external_imu.velocity_covariance.sum();
-    // 使用协方差的倒数，外部协方差越大，其倒数越小，权重越小
-    double internal_inv = 1.0 / (internal_velocity_cov + 1e-6); // 加小值防止除零
-    double external_inv = 1.0 / (external_velocity_cov + 1e-6);
-    external_imu_weight = external_inv / (internal_inv + external_inv);
-    state_inout.vel_end = (1 - external_imu_weight) * vel_imu + external_imu_weight * external_velocity_transformed;
+      // 在IMU初始化阶段，优先使用外置IMU数据
+      if (imu_need_init) {
+        std::cout << "[ IMU Init ] Using external IMU velocity during initialization" << std::endl;
+        state_inout.vel_end = external_velocity_transformed;
+      } else {
+        // 正常运行时，融合内外置IMU数据
+        double internal_velocity_cov = state_inout.cov.block<3, 3>(7, 7).diagonal().sum();
+        double external_velocity_cov = interpolated_external_imu.velocity_covariance.sum();
+        // 使用协方差的倒数，外部协方差越大，其倒数越小，权重越小
+        double internal_inv = 1.0 / (internal_velocity_cov + 1e-9); // 加小值防止除零
+        double external_inv = 1.0 / (external_velocity_cov + 1e-9);
+        double external_imu_weight = external_inv / (internal_inv + external_inv);
+        state_inout.vel_end = (1 - external_imu_weight) * vel_imu + external_imu_weight * external_velocity_transformed;
 
-    std::cout << std::fixed << std::setprecision(6);
-    // std::cout << "[ Preprocess ] External imu first velocity: [" << external_imus.first.linear_velocity.transpose() << "]" << std::endl;
-    // std::cout << "[ Preprocess ] External imu second velocity: [" << external_imus.second.linear_velocity.transpose() << "]" << std::endl;
-    // std::cout << "[ Preprocess ] External imu first covariance: [" << external_imus.first.velocity_covariance.transpose() << "]" << std::endl;
-    // std::cout << "[ Preprocess ] External imu second covariance: [" << external_imus.second.velocity_covariance.transpose() << "]" << std::endl;
-    std::cout << "[ Preprocess ] External IMU weight: " << external_imu_weight << std::endl;
-    std::cout << "[ Preprocess ] Internal velocity: [" << vel_imu.transpose() << "]" << std::endl;
-    std::cout << "[ Preprocess ] External velocity: [" << external_velocity_transformed.transpose() << "]" << std::endl;
-    // std::cout << "[ Preprocess ] Internal covariance: [" << state_inout.cov.block<3, 3>(7, 7).diagonal().transpose() << "]" << std::endl;
-    // std::cout << "[ Preprocess ] External covariance: [" << interpolated_external_imu.velocity_covariance.transpose() << "]" << std::endl;
+        std::cout << std::fixed << std::setprecision(6);
+        std::cout << "[ Preprocess ] External IMU weight: " << external_imu_weight << std::endl;
+        std::cout << "[ Preprocess ] Internal velocity: [" << vel_imu.transpose() << "]" << std::endl;
+        std::cout << "[ Preprocess ] External velocity: [" << external_velocity_transformed.transpose() << "]" << std::endl;
+      }
 
+    } else {
+      std::cout << "No valid external IMU data found, using internal IMU only" << std::endl;
+      state_inout.vel_end = vel_imu;
+    }
   } else {
-    std::cout << "No valid external IMU data found, using internal IMU only" << std::endl;
+    // 外置IMU未启用，直接使用内部IMU速度
     state_inout.vel_end = vel_imu;
   }
   state_inout.rot_end = R_imu;
@@ -685,7 +694,7 @@ void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_
   // printf("[ IMU ] time forward: %lf, backward: %lf.\n", t1 - t0, omp_get_wtime() - t1);
 }
 
-void ImuProcess::Process2(LidarMeasureGroup &lidar_meas, StatesGroup &stat, PointCloudXYZI::Ptr cur_pcl_un_, deque<ExternalIMUData> external_imu_buffer, double external_imu_weight)
+void ImuProcess::Process2(LidarMeasureGroup &lidar_meas, StatesGroup &stat, PointCloudXYZI::Ptr cur_pcl_un_, deque<ExternalIMUData> external_imu_buffer, bool external_imu_enable)
 {
   double t1, t2, t3;
   t1 = omp_get_wtime();
@@ -726,10 +735,14 @@ void ImuProcess::Process2(LidarMeasureGroup &lidar_meas, StatesGroup &stat, Poin
       fout_imu.open(DEBUG_FILE_DIR("imu.txt"), ios::out);
     }
 
+    // 去畸变点云核心函数
+    UndistortPcl(lidar_meas, stat, *cur_pcl_un_, external_imu_buffer, external_imu_enable);
+    // cout << "[ IMU ] undistorted point num: " << cur_pcl_un_->size() << endl;
+
     return;
   }
 
   // 去畸变点云核心函数
-  UndistortPcl(lidar_meas, stat, *cur_pcl_un_, external_imu_buffer, external_imu_weight);
+  UndistortPcl(lidar_meas, stat, *cur_pcl_un_, external_imu_buffer, external_imu_enable);
   // cout << "[ IMU ] undistorted point num: " << cur_pcl_un_->size() << endl;
 }

@@ -140,9 +140,12 @@ void LIVMapper::readParameters(ros::NodeHandle &nh)
   // 读取外置IMU参数
   nh.param<string>("common/external_imu_topic", external_imu_topic, "/novatel/oem7/odom");
   nh.param<bool>("external_imu/enable", external_imu_enable, false);
-  nh.param<double>("external_imu/weight", external_imu_weight, 0.5);
   nh.param<double>("external_imu/time_offset", external_imu_time_offset, 0.0);
   nh.param<int>("external_imu/buffer_size", external_imu_buffer_size, 1000);
+  
+  // 读取外置IMU外参
+  nh.param<vector<double>>("external_imu/external_T", external_imu_T_vec, vector<double>());
+  nh.param<vector<double>>("external_imu/external_R", external_imu_R_vec, vector<double>());
 
   p_pre->blind_sqr = p_pre->blind * p_pre->blind;
 }
@@ -152,6 +155,9 @@ void LIVMapper::initializeComponents()
   downSizeFilterSurf.setLeafSize(filter_size_surf_min, filter_size_surf_min, filter_size_surf_min);
   extT << VEC_FROM_ARRAY(extrinT);
   extR << MAT_FROM_ARRAY(extrinR);
+
+  external_imu_T << VEC_FROM_ARRAY(external_imu_T_vec);
+  external_imu_R << MAT_FROM_ARRAY(external_imu_R_vec);
 
   voxelmap_manager->extT_ << VEC_FROM_ARRAY(extrinT);
   voxelmap_manager->extR_ << MAT_FROM_ARRAY(extrinR);
@@ -248,8 +254,13 @@ void LIVMapper::initializeSubscribersAndPublishers(ros::NodeHandle &nh, image_tr
             nh.subscribe(lid_topic, 200000, &LIVMapper::standard_pcl_cbk, this);
   sub_imu = nh.subscribe(imu_topic, 200000, &LIVMapper::imu_cbk, this);
   sub_img = nh.subscribe(img_topic, 200000, &LIVMapper::img_cbk, this);
+  
+  // 只有在启用外置IMU时才订阅相关话题
   if (external_imu_enable) {
       sub_external_imu = nh.subscribe(external_imu_topic, 200000, &LIVMapper::odom_cbk, this);
+      ROS_INFO("External IMU enabled, subscribing to topic: %s", external_imu_topic.c_str());
+  } else {
+      ROS_INFO("External IMU disabled");
   }
     
   pubLaserCloudFullRes = nh.advertise<sensor_msgs::PointCloud2>("/cloud_registered", 100);
@@ -305,7 +316,7 @@ void LIVMapper::processImu()
 {
   // double t0 = omp_get_wtime();
 
-  p_imu->Process2(LidarMeasures, _state, feats_undistort, external_imu_buffer, external_imu_weight); // 调用IMU处理模块，传入external IMU buffer和权重
+  p_imu->Process2(LidarMeasures, _state, feats_undistort, external_imu_buffer, external_imu_enable); // 调用IMU处理模块，传入external IMU buffer和启用状态
 
   if (gravity_align_en) gravityAlignment();
 
@@ -999,7 +1010,10 @@ void LIVMapper::imu_cbk(const sensor_msgs::Imu::ConstPtr &msg_in)
 
 void LIVMapper::odom_cbk(const nav_msgs::Odometry::ConstPtr &msg_in)
 {
-    if (!external_imu_enable) return;
+    // 如果外置IMU未启用，直接返回
+    if (!external_imu_enable) {
+        return;
+    }
     
     mtx_buffer.lock();
     
@@ -1039,20 +1053,16 @@ void LIVMapper::odom_cbk(const nav_msgs::Odometry::ConstPtr &msg_in)
                          msg_in->pose.pose.orientation.y,
                          msg_in->pose.pose.orientation.z);
 
-    // 坐标变换矩阵
-    M3D R_external_to_internal;
-    R_external_to_internal << 0, 0, -1,    // 内置X = 外置-Z
-                            1, 0,  0,     // 内置Y = 外置X  
-                            0, -1, 0;     // 内置Z = 外置-Y
-    
-    external_data.linear_velocity = R_external_to_internal * external_data.linear_velocity;
+    // 使用配置文件中的外参进行坐标变换
+    // 首先应用外置IMU到内置IMU的旋转变换
+    external_data.linear_velocity = external_imu_R * external_data.linear_velocity;
 
     // 对速度协方差进行坐标变换
     // 协方差变换公式: C_internal = R * C_external * R^T
     // 对于对角协方差矩阵，需要完整的3x3变换
     Eigen::Matrix3d external_cov_matrix = Eigen::Matrix3d::Zero();
     external_cov_matrix.diagonal() = external_data.velocity_covariance;
-    Eigen::Matrix3d internal_cov_matrix = R_external_to_internal * external_cov_matrix * R_external_to_internal.transpose();
+    Eigen::Matrix3d internal_cov_matrix = external_imu_R * external_cov_matrix * external_imu_R.transpose();
     external_data.velocity_covariance = internal_cov_matrix.diagonal();
 
     last_external_imu_time = timestamp;

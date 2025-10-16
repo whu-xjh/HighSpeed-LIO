@@ -1,3 +1,0 @@
-无效体素的点云不放入cloud_registered中，也不放入更新体素地图中
-看看新添加代码哪里可以优化
-ineffective点云发布有问题
