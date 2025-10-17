@@ -828,24 +828,47 @@ void LIVMapper::imu_prop_callback(const ros::TimerEvent &e)
   mtx_buffer_imu_prop.unlock();
 }
 
-void LIVMapper::transformLidar(const Eigen::Matrix3d rot, const Eigen::Vector3d t, const PointCloudXYZI::Ptr &input_cloud, PointCloudXYZI::Ptr &trans_cloud)
+void LIVMapper::transformLidar(const Eigen::Matrix3d rot, const Eigen::Vector3d t, 
+                              const PointCloudXYZI::Ptr &input_cloud, 
+                              PointCloudXYZI::Ptr &trans_cloud)
 {
-  // 输入依次为旋转矩阵、平移向量、输入点云指针、输出点云指针
-  PointCloudXYZI().swap(*trans_cloud); // 清空输出点云
-  trans_cloud->reserve(input_cloud->size()); // 预分配内存
-  Eigen::Matrix3d rot_extR = rot * extR;
-  Eigen::Vector3d rot_extT = rot * extT + t;
-  for (size_t i = 0; i < input_cloud->size(); i++)
+  // 1. 预检查空输入
+  if (input_cloud->empty()) {
+    trans_cloud->clear();
+    return;
+  }
+  
+  // 2. 预计算变换矩阵元素
+  const Eigen::Matrix3d rot_extR = rot * extR;
+  const Eigen::Vector3d rot_extT = rot * extT + t;
+  
+  // 3. 预分配内存
+  trans_cloud->clear();
+  trans_cloud->points.reserve(input_cloud->size());
+  
+  // 4. 提取矩阵元素为局部变量，提高缓存命中率
+  const double r00 = rot_extR(0,0), r01 = rot_extR(0,1), r02 = rot_extR(0,2);
+  const double r10 = rot_extR(1,0), r11 = rot_extR(1,1), r12 = rot_extR(1,2);
+  const double r20 = rot_extR(2,0), r21 = rot_extR(2,1), r22 = rot_extR(2,2);
+  const double tx = rot_extT(0), ty = rot_extT(1), tz = rot_extT(2);
+  
+  // 5. 批量处理点云
+  trans_cloud->points.resize(input_cloud->size());
+  for (size_t i = 0; i < input_cloud->size(); ++i)
   {
-    pcl::PointXYZINormal p_c = input_cloud->points[i];
-    Eigen::Vector3d p(p_c.x, p_c.y, p_c.z);
-    p = rot_extR * p + rot_extT; // 激光雷达先转换到IMU坐标系，再转换到世界坐标系
-    PointType pi;
-    pi.x = p(0);
-    pi.y = p(1);
-    pi.z = p(2);
+    const pcl::PointXYZINormal& p_c = input_cloud->points[i];
+    PointType& pi = trans_cloud->points[i];
+    
+    // 直接计算，避免Eigen Vector3d构造开销
+    const double x = p_c.x;
+    const double y = p_c.y;
+    const double z = p_c.z;
+    
+    // 手动展开矩阵乘法，利用编译器向量化
+    pi.x = r00 * x + r01 * y + r02 * z + tx;
+    pi.y = r10 * x + r11 * y + r12 * z + ty;
+    pi.z = r20 * x + r21 * y + r22 * z + tz;
     pi.intensity = p_c.intensity;
-    trans_cloud->points.push_back(pi);
   }
 }
 

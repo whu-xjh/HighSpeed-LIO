@@ -394,20 +394,10 @@ VoxelOctoTree *VoxelOctoTree::Insert(const pointWithVar &pv)
 
 void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
 {
-  // 优化：避免不必要的清空和重新分配，仅在容量不足时才调整
-  if (cross_mat_list_.capacity() < feats_down_size_) {
-    cross_mat_list_.clear();
-    cross_mat_list_.reserve(feats_down_size_);
-  } else {
-    cross_mat_list_.resize(0);
-  }
-
-  if (body_cov_list_.capacity() < feats_down_size_) {
-    body_cov_list_.clear();
-    body_cov_list_.reserve(feats_down_size_);
-  } else {
-    body_cov_list_.resize(0);
-  }
+  cross_mat_list_.clear();
+  cross_mat_list_.reserve(feats_down_size_);
+  body_cov_list_.clear();
+  body_cov_list_.reserve(feats_down_size_);
 
   // build_residual_time = 0.0;
   // ekf_time = 0.0;
