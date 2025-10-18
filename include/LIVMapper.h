@@ -94,8 +94,10 @@ public:
   void publish_frame_body(const ros::Publisher &pubLaserCloudBody);
 
   void publish_visual_sub_map(const ros::Publisher &pubSubVisualMap);
-  void publish_effective_world(const ros::Publisher &pubLaserCloudEffective, const std::vector<PointToPlane> &ptpl_list);
-  void publish_ineffective_world(const ros::Publisher &pubLaserCloudIneffective, const std::vector<PointToPlane> &ineffective_points);
+  void publish_effect_world(const ros::Publisher &pubLaserCloudEffect, const std::vector<PointToPlane> &ptpl_list);
+  void publish_voxel_points(const ros::Publisher &pubGroundCloud,
+                          const ros::Publisher &pubSurfaceCloud,
+                          const ros::Publisher &pubNonSurfaceCloud);
   void publish_odometry(const ros::Publisher &pubOdomAftMapped);
   void publish_mavros(const ros::Publisher &mavros_pose_publisher);
   void publish_path(const ros::Publisher pubPath);
@@ -105,6 +107,8 @@ public:
   template <typename T> Eigen::Matrix<T, 3, 1> pointBodyToWorld(const Eigen::Matrix<T, 3, 1> &pi);
   cv::Mat getImageFromMsg(const sensor_msgs::ImageConstPtr &img_msg);
 
+private:
+  VoxelOctoTree* getVoxelForPoint(const V3D& point_w);
   std::mutex mtx_buffer, mtx_buffer_imu_prop;
   std::condition_variable sig_buffer;
 
@@ -127,7 +131,7 @@ public:
   double _first_lidar_time = 0.0;
   double match_time = 0, solve_time = 0, solve_const_H_time = 0;
 
-  bool lidar_map_inited = false, save_en = false, pub_effect_point_en = false, publish_cloud_body = false, pose_output_en = false, ros_driver_fix_en = false, hilti_en = false;
+  bool lidar_map_inited = false, save_en = false, pub_effect_en = false, pub_voxel_points_en = false, pub_body_en = false, pose_output_en = false, ros_driver_fix_en = false, hilti_en = false;
   bool laz_save_en = false, effect_save_en = false;
 
   int save_interval = -1, pcd_index = 0, scan_wait_num = 0;
@@ -214,16 +218,17 @@ public:
   ros::Publisher pubLaserCloudFullRes;
   ros::Publisher pubNormal;
   ros::Publisher pubSubVisualMap;
-  ros::Publisher pubLaserCloudEffective;
-  ros::Publisher pubLaserCloudIneffective;
+  ros::Publisher pubLaserCloudEffect;
   ros::Publisher pubLaserCloudMap;
+  ros::Publisher pubGroundCloud;
+  ros::Publisher pubSurfaceCloud;
+  ros::Publisher pubNonSurfaceCloud;
   ros::Publisher pubOdomAftMapped;
   ros::Publisher pubPath;
   ros::Publisher pubLaserCloudDyn;
   ros::Publisher pubLaserCloudDynRmed;
   ros::Publisher pubLaserCloudDynDbg;
   ros::Publisher pubLaserCloudBody;
-  ros::Publisher pubGroundCloud;
   image_transport::Publisher pubImage;
   ros::Publisher mavros_pose_publisher;
   ros::Subscriber sub_odom;

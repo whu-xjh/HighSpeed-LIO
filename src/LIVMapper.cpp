@@ -133,9 +133,10 @@ void LIVMapper::readParameters(ros::NodeHandle &nh)
 
   nh.param<double>("publish/blind_rgb_points", blind_rgb_points, 0.01);
   nh.param<int>("publish/pub_scan_num", pub_scan_num, 1);
-  nh.param<bool>("publish/pub_effect_point_en", pub_effect_point_en, false);
+  nh.param<bool>("publish/pub_effect_en", pub_effect_en, false);
+  nh.param<bool>("publish/pub_voxel_points_en", pub_voxel_points_en, false);
   nh.param<bool>("publish/dense_map_en", dense_map_en, false);
-  nh.param<bool>("publish/pub_cloud_body", publish_cloud_body, false);
+  nh.param<bool>("publish/pub_cloud_body", pub_body_en, false);
 
   // 读取外置IMU参数
   nh.param<string>("common/external_imu_topic", external_imu_topic, "/novatel/oem7/odom");
@@ -262,14 +263,16 @@ void LIVMapper::initializeSubscribersAndPublishers(ros::NodeHandle &nh, image_tr
   } else {
       ROS_INFO("External IMU disabled");
   }
-    
+   
   pubLaserCloudFullRes = nh.advertise<sensor_msgs::PointCloud2>("/cloud_registered", 100);
   pubLaserCloudBody = nh.advertise<sensor_msgs::PointCloud2>("/cloud_body", 100);
   pubNormal = nh.advertise<visualization_msgs::MarkerArray>("visualization_marker", 100);
   pubSubVisualMap = nh.advertise<sensor_msgs::PointCloud2>("/cloud_visual_sub_map_before", 100);
-  pubLaserCloudEffective = nh.advertise<sensor_msgs::PointCloud2>("/cloud_effective", 100);
-  pubLaserCloudIneffective = nh.advertise<sensor_msgs::PointCloud2>("/cloud_ineffective", 100);
+  pubLaserCloudEffect = nh.advertise<sensor_msgs::PointCloud2>("/cloud_effected", 100);
   pubLaserCloudMap = nh.advertise<sensor_msgs::PointCloud2>("/Laser_map", 100);
+  pubGroundCloud = nh.advertise<sensor_msgs::PointCloud2>("/cloud_ground", 100);
+  pubSurfaceCloud = nh.advertise<sensor_msgs::PointCloud2>("/cloud_surface", 100);
+  pubNonSurfaceCloud = nh.advertise<sensor_msgs::PointCloud2>("/cloud_non_surface", 100);
   pubOdomAftMapped = nh.advertise<nav_msgs::Odometry>("/aft_mapped_to_init", 10);
   pubPath = nh.advertise<nav_msgs::Path>("/path", 10);
   plane_pub = nh.advertise<visualization_msgs::Marker>("/planner_normal", 1);
@@ -277,7 +280,6 @@ void LIVMapper::initializeSubscribersAndPublishers(ros::NodeHandle &nh, image_tr
   mavros_pose_publisher = nh.advertise<geometry_msgs::PoseStamped>("/mavros/vision_pose/pose", 10);
   pubImage = it.advertise("/rgb_img", 1);
   pubImuPropOdom = nh.advertise<nav_msgs::Odometry>("/LIVO2/imu_propagate", 10000);
-  pubGroundCloud = nh.advertise<sensor_msgs::PointCloud2>("/ground_cloud", 100);
 
   imu_prop_timer = nh.createTimer(ros::Duration(0.004), &LIVMapper::imu_prop_callback, this);
   voxelmap_manager->voxel_map_pub_= nh.advertise<visualization_msgs::MarkerArray>("/planes", 10000);
@@ -476,7 +478,7 @@ void LIVMapper::handleLIO()
     // 构建观测：点云到平面的距离
     for (int i = 0; i < effct_feat_num_; i++)
     {
-        meas_vec(i) = -ptpl_effective_list_[i].dis_to_plane_;  // 观测值
+        meas_vec(i) = -ptpl_list_[i].dis_to_plane_;  // 观测值
     }
     - 将当前帧点云与地图中的平面对齐
     - 点到平面的距离作为观测量
@@ -605,17 +607,14 @@ void LIVMapper::handleLIO()
   *pcl_w_wait_pub = *laserCloudWorld;
   double t6 = omp_get_wtime();
 
+  if (pub_voxel_points_en) publish_voxel_points(pubGroundCloud, pubSurfaceCloud, pubNonSurfaceCloud); // 基于体素类型分类发布点云
   if (!img_en) publish_frame_world(pubLaserCloudFullRes, vio_manager); // 如果没有图像信息，发布点云
-  if (publish_cloud_body) publish_frame_body(pubLaserCloudBody); // 发布机身坐标系下的点云
-  if (pub_effect_point_en) {
-    publish_effective_world(pubLaserCloudEffective, voxelmap_manager->ptpl_effective_list_); // 发布有效点云
-    publish_ineffective_world(pubLaserCloudIneffective, voxelmap_manager->ptpl_ineffective_list_); // 发布无效点云
-  }
+  if (pub_body_en) publish_frame_body(pubLaserCloudBody); // 发布机身坐标系下的点云
+  if (pub_effect_en) publish_effect_world(pubLaserCloudEffect, voxelmap_manager->ptpl_list_); // 发布有效点云
   if (voxelmap_manager->config_setting_.is_pub_plane_map_) voxelmap_manager->pubVoxelMap(); // 发布体素地图
-  if (save_en) save_frame_world(voxelmap_manager->ptpl_effective_list_); // 保存点云到文件
+  if (save_en) save_frame_world(voxelmap_manager->ptpl_list_); // 保存点云到文件
   publish_path(pubPath); // 发布路径
   publish_mavros(mavros_pose_publisher); // 发布MAVROS位姿
-
   
   frame_num++;
   double t7 = omp_get_wtime();
@@ -1545,13 +1544,7 @@ void LIVMapper::save_frame_world(const std::vector<PointToPlane> &ptpl_list)
   if (ptpl_list.empty()) return;
   if (save_en)
   {
-    if (effect_save_en){
-      ptpl_list_wait_save.insert(ptpl_list_wait_save.end(), ptpl_list.begin(), ptpl_list.end());
-      printf("Accumulated %zu effective points for saving\n", ptpl_list_wait_save.size());
-    }
-    else{
-      *pcl_wait_save_intensity += *pcl_w_wait_pub;
-    }
+    *pcl_wait_save_intensity += *pcl_w_wait_pub;
     scan_wait_num++;
 
     if ((pcl_wait_save_intensity->size() > 0 || ptpl_list_wait_save.size() > 0) && save_interval > 0 && scan_wait_num >= save_interval)
@@ -1560,51 +1553,21 @@ void LIVMapper::save_frame_world(const std::vector<PointToPlane> &ptpl_list)
       string file_extension = laz_save_en ? ".laz" : ".pcd";
       string all_points_dir(pcd_session_dir_ + "/" + to_string(pcd_index) + file_extension);
       
-      if (effect_save_en){
-        int effect_feat_num = ptpl_list_wait_save.size();
-        printf("Save map with %d effective points to %s\n", effect_feat_num, all_points_dir.c_str());
-        PointCloudXYZI::Ptr laserCloudWorld(new PointCloudXYZI(effect_feat_num, 1));
-        for (int i = 0; i < effect_feat_num; i++)
-        {
-          laserCloudWorld->points[i].x = ptpl_list_wait_save[i].point_w_[0];
-          laserCloudWorld->points[i].y = ptpl_list_wait_save[i].point_w_[1];
-          laserCloudWorld->points[i].z = ptpl_list_wait_save[i].point_w_[2];
-          laserCloudWorld->points[i].intensity = ptpl_list_wait_save[i].intensity_;
-        }
-        auto pcl_wait_save_copy = *laserCloudWorld;
-        if (laz_save_en) {
-          // Queue LAZ save task to separate thread
-          queueLazSaveTask(all_points_dir, [this, all_points_dir, pcl_wait_save_copy]() {
-            saveAsLAZ(all_points_dir, pcl_wait_save_copy);
-          });
-        } else {
-          pcl::PCDWriter pcd_writer;
-          pcd_writer.writeBinary(all_points_dir, *laserCloudWorld);
-        }
-        PointCloudXYZI().swap(*laserCloudWorld);
-        ptpl_list_wait_save.clear();
-        Eigen::Quaterniond q(_state.rot_end);
-        fout_pcd_pos << _state.pos_end[0] << " " << _state.pos_end[1] << " " << _state.pos_end[2] << " " << q.w() << " " << q.x() << " " << q.y()
-                      << " " << q.z() << " " << endl;
-        scan_wait_num = 0;
+      if (laz_save_en) {
+      // Queue LAZ save task to separate thread
+      auto pcl_wait_save_intensity_copy = *pcl_wait_save_intensity;
+      queueLazSaveTask(all_points_dir, [this, all_points_dir, pcl_wait_save_intensity_copy]() {
+        saveAsLAZ(all_points_dir, pcl_wait_save_intensity_copy);
+      });
+      } else {
+        pcl::PCDWriter pcd_writer;
+        pcd_writer.writeBinary(all_points_dir, *pcl_wait_save_intensity);
       }
-      else{
-        if (laz_save_en) {
-        // Queue LAZ save task to separate thread
-        auto pcl_wait_save_intensity_copy = *pcl_wait_save_intensity;
-        queueLazSaveTask(all_points_dir, [this, all_points_dir, pcl_wait_save_intensity_copy]() {
-          saveAsLAZ(all_points_dir, pcl_wait_save_intensity_copy);
-        });
-        } else {
-          pcl::PCDWriter pcd_writer;
-          pcd_writer.writeBinary(all_points_dir, *pcl_wait_save_intensity);
-        }
-        PointCloudXYZI().swap(*pcl_wait_save_intensity);
-        Eigen::Quaterniond q(_state.rot_end);
-        fout_pcd_pos << _state.pos_end[0] << " " << _state.pos_end[1] << " " << _state.pos_end[2] << " " << q.w() << " " << q.x() << " " << q.y()
-                      << " " << q.z() << " " << endl;
-        scan_wait_num = 0;
-      } 
+      PointCloudXYZI().swap(*pcl_wait_save_intensity);
+      Eigen::Quaterniond q(_state.rot_end);
+      fout_pcd_pos << _state.pos_end[0] << " " << _state.pos_end[1] << " " << _state.pos_end[2] << " " << q.w() << " " << q.x() << " " << q.y()
+                    << " " << q.z() << " " << endl;
+      scan_wait_num = 0; 
     }
   }
   PointCloudXYZI().swap(*pcl_w_wait_pub);
@@ -1626,7 +1589,7 @@ void LIVMapper::publish_visual_sub_map(const ros::Publisher &pubSubVisualMap)
   }
 }
 
-void LIVMapper::publish_effective_world(const ros::Publisher &pubLaserCloudEffective, const std::vector<PointToPlane> &ptpl_list)
+void LIVMapper::publish_effect_world(const ros::Publisher &pubLaserCloudEffect, const std::vector<PointToPlane> &ptpl_list)
 {
   int effect_feat_num = ptpl_list.size();
   PointCloudXYZI::Ptr laserCloudWorld(new PointCloudXYZI(effect_feat_num, 1));
@@ -1641,33 +1604,121 @@ void LIVMapper::publish_effective_world(const ros::Publisher &pubLaserCloudEffec
   pcl::toROSMsg(*laserCloudWorld, laserCloudFullRes3);
   laserCloudFullRes3.header.stamp = ros::Time::now();
   laserCloudFullRes3.header.frame_id = "camera_init";
-  pubLaserCloudEffective.publish(laserCloudFullRes3);
+  pubLaserCloudEffect.publish(laserCloudFullRes3);
 }
 
-void LIVMapper::publish_ineffective_world(const ros::Publisher &pubLaserCloudIneffective, const std::vector<PointToPlane> &ineffective_points)
+void LIVMapper::publish_voxel_points(const ros::Publisher &pubGroundCloud,
+                                     const ros::Publisher &pubSurfaceCloud,
+                                     const ros::Publisher &pubNonSurfaceCloud)
 {
-  if (ineffective_points.empty()) return;
+  if (pcl_w_wait_pub->empty()) return;
 
-  // 创建无效点点云
-  PointCloudXYZI::Ptr ineffectiveCloud(new PointCloudXYZI());
-  ineffectiveCloud->reserve(ineffective_points.size());
+  PointCloudXYZI::Ptr ground_cloud(new PointCloudXYZI());
+  PointCloudXYZI::Ptr surface_cloud(new PointCloudXYZI());
+  PointCloudXYZI::Ptr non_surface_cloud(new PointCloudXYZI());
 
-  // 直接从ptpl_ineffective_list_中提取无效点
-  for (const auto& pt : ineffective_points) {
-    PointType point;
-    point.x = pt.point_w_[0];
-    point.y = pt.point_w_[1];
-    point.z = pt.point_w_[2];
-    point.intensity = pt.intensity_;
-    ineffectiveCloud->points.push_back(point);
+  double voxel_size = voxelmap_manager->config_setting_.max_voxel_size_;
+  int found_voxels = 0;
+  int effective_voxels = 0;
+  int ground_voxels = 0;
+
+  // 遍历所有点，根据体素类型分类
+  for (const auto& point : pcl_w_wait_pub->points)
+  {
+    V3D point_w(point.x, point.y, point.z);
+    VoxelOctoTree* voxel = getVoxelForPoint(point_w);
+
+    if (voxel != nullptr)
+    {
+      found_voxels++;
+
+      if (voxel->is_ground_voxel_)
+      {
+        ground_voxels++;
+        ground_cloud->points.push_back(point);
+      }
+
+      if (voxel->is_surface_voxel_)
+      {
+        effective_voxels++;
+        surface_cloud->points.push_back(point);
+      }
+      
+      if (!voxel->is_surface_voxel_ && !voxel->is_ground_voxel_)
+      {
+        non_surface_cloud->points.push_back(point);
+      }
+    }
+    else
+    {
+      // 如果没有找到对应的体素，归类为非面点
+      non_surface_cloud->points.push_back(point);
+    }
   }
 
-  // 发布无效点云
-  sensor_msgs::PointCloud2 ineffectiveCloudMsg;
-  pcl::toROSMsg(*ineffectiveCloud, ineffectiveCloudMsg);
-  ineffectiveCloudMsg.header.stamp = ros::Time::now();
-  ineffectiveCloudMsg.header.frame_id = "camera_init";
-  pubLaserCloudIneffective.publish(ineffectiveCloudMsg);
+  // 设置点云属性
+  ground_cloud->width = ground_cloud->points.size();
+  ground_cloud->height = 1;
+  ground_cloud->is_dense = true;
+
+  surface_cloud->width = surface_cloud->points.size();
+  surface_cloud->height = 1;
+  surface_cloud->is_dense = true;
+
+  non_surface_cloud->width = non_surface_cloud->points.size();
+  non_surface_cloud->height = 1;
+  non_surface_cloud->is_dense = true;
+
+  // 发布点云
+  if (!ground_cloud->empty())
+  {
+    sensor_msgs::PointCloud2 ground_msg;
+    pcl::toROSMsg(*ground_cloud, ground_msg);
+    ground_msg.header.stamp = ros::Time::now();
+    ground_msg.header.frame_id = "camera_init";
+    pubGroundCloud.publish(ground_msg);
+  }
+
+  if (!surface_cloud->empty())
+  {
+    sensor_msgs::PointCloud2 surface_msg;
+    pcl::toROSMsg(*surface_cloud, surface_msg);
+    surface_msg.header.stamp = ros::Time::now();
+    surface_msg.header.frame_id = "camera_init";
+    pubSurfaceCloud.publish(surface_msg);
+  }
+
+  if (!non_surface_cloud->empty())
+  {
+    sensor_msgs::PointCloud2 non_surface_msg;
+    pcl::toROSMsg(*non_surface_cloud, non_surface_msg);
+    non_surface_msg.header.stamp = ros::Time::now();
+    non_surface_msg.header.frame_id = "camera_init";
+    pubNonSurfaceCloud.publish(non_surface_msg);
+  }
+}
+
+VoxelOctoTree* LIVMapper::getVoxelForPoint(const V3D& point_w)
+{
+  double voxel_size = voxelmap_manager->config_setting_.max_voxel_size_;
+
+  // 计算体素坐标
+  float loc_xyz[3];
+  for (int j = 0; j < 3; j++)
+  {
+    loc_xyz[j] = point_w[j] / voxel_size;
+    if (loc_xyz[j] < 0) { loc_xyz[j] -= 1.0; }
+  }
+
+  VOXEL_LOCATION position((int64_t)loc_xyz[0], (int64_t)loc_xyz[1], (int64_t)loc_xyz[2]);
+  auto iter = voxelmap_manager->voxel_map_.find(position);
+
+  if (iter != voxelmap_manager->voxel_map_.end())
+  {
+    return iter->second;
+  }
+
+  return nullptr;
 }
 
 template <typename T> void LIVMapper::set_posestamp(T &out)

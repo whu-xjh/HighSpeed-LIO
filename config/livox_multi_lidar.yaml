@@ -59,25 +59,26 @@ lio:
   max_layer: 2
   max_points_num: 64
   layer_init_num: [1, 1, 1, 1, 1]
-  sigma_num: 4
+  sigma_num: 3
 
 local_map:
   map_sliding_en: true
-  half_map_size: 1000
-  sliding_thresh: 20
+  half_map_size: 500
+  sliding_thresh: 8
 
 uav:
-  imu_rate_odom: true
+  imu_rate_odom: false
   gravity_align_en: false
   elevation_axis: "-x"  # 可选值: "x", "-x", "y", "-y", "z", "-z"
 
 publish:
   dense_map_en: true
-  pub_effect_point_en: true
+  pub_effect_en: true
   pub_plane_en: false
+  pub_body_en: false  # 是否发布body坐标系下的点云
+  pub_voxel_points_en: true
   pub_scan_num: 1
   blind_rgb_points: 0.0
-  publish_cloud_body: false  # 是否发布body坐标系下的点云
 
 evo:
   seq_name: "CBD_Building_01"
@@ -85,7 +86,6 @@ evo:
 
 lidar_save:
   save_en: false
-  effect_save_en: false
   laz_save_en: true
   colmap_output_en: false # need to set interval = -1
   filter_size_pcd: 0.15

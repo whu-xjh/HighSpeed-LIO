@@ -568,9 +568,9 @@ void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_
         state_inout.vel_end = (1 - external_imu_weight) * vel_imu + external_imu_weight * external_velocity_transformed;
 
         std::cout << std::fixed << std::setprecision(6);
-        std::cout << "[ Preprocess ] External IMU weight: " << external_imu_weight << std::endl;
-        std::cout << "[ Preprocess ] Internal velocity: [" << vel_imu.transpose() << "]" << std::endl;
-        std::cout << "[ Preprocess ] External velocity: [" << external_velocity_transformed.transpose() << "]" << std::endl;
+        std::cout << "[ Odom Integration ] External IMU weight: " << external_imu_weight << std::endl;
+        std::cout << "[ Odom Integration ] External velocity: [" << external_velocity_transformed.transpose() << "]" << std::endl;
+        std::cout << "[ Odom Integration ] Internal velocity: [" << vel_imu.transpose() << "]" << std::endl;
       }
 
     } else {

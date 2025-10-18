@@ -75,9 +75,9 @@ publish:
   dense_map_en: true
   pub_effect_point_en: true
   pub_plane_en: false
+  pub_body_en: false  # 是否发布body坐标系下的点云
   pub_scan_num: 1
   blind_rgb_points: 0.0
-  publish_cloud_body: false  # 是否发布body坐标系下的点云
 
 evo:
   seq_name: "CBD_Building_01"

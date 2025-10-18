@@ -102,7 +102,7 @@ Visualization Manager:
           Size (Pixels): 2
           Size (m): 0.009999999776482582
           Style: Points
-          Topic: /cloud_ineffective
+          Topic: /cloud_registered
           Unreliable: false
           Use Fixed Frame: true
           Use rainbow: false
@@ -160,7 +160,7 @@ Visualization Manager:
           Size (Pixels): 5
           Size (m): 0.019999999552965164
           Style: Squares
-          Topic: /cloud_effective
+          Topic: /cloud_registered
           Unreliable: false
           Use Fixed Frame: true
           Use rainbow: true

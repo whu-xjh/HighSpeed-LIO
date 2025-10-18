@@ -46,13 +46,13 @@ typedef struct VoxelMapConfig
   double beam_err_;
   double dept_err_;
   double sigma_num_;
-  bool is_pub_plane_map_; 
+  bool is_pub_plane_map_;
 
   // config of local map sliding
   double sliding_thresh;
   bool map_sliding_en;
   int half_map_size;
-  
+
   // config for elevation axis specification
   std::string elevation_axis_;
 } VoxelMapConfig;
@@ -169,7 +169,7 @@ public:
   bool init_octo_;
   bool update_enable_;
   bool is_ground_voxel_ = false;
-  bool is_sky_voxel_ = false;
+  bool is_surface_voxel_ = false;
 
   VoxelOctoTree(int max_layer, int layer, int points_size_threshold, int max_points_num, float planer_threshold)
       : max_layer_(max_layer), layer_(layer), points_size_threshold_(points_size_threshold), max_points_num_(max_points_num),
@@ -241,9 +241,8 @@ public:
   std::vector<M3D> cross_mat_list_;
   std::vector<M3D> body_cov_list_;
   std::vector<pointWithVar> pv_list_;
-  std::vector<PointToPlane> ptpl_effective_list_;
-  std::vector<PointToPlane> ptpl_ineffective_list_;
-  
+  std::vector<PointToPlane> ptpl_list_;
+
   // 高程方向配置
   int elevation_axis_index_;  // 0=x, 1=y, 2=z
   double elevation_multiplier_; // 1.0 or -1.0
@@ -297,12 +296,13 @@ public:
 
   void UpdateVoxelMap(const std::vector<pointWithVar> &input_points);
 
-  void BuildResidualListOMP(std::vector<pointWithVar> &pv_list, std::vector<bool> &useful_ptpl, std::vector<bool> &ignored_ptpl, std::vector<PointToPlane> &all_ptpl_list);
+  void BuildResidualListOMP(std::vector<pointWithVar> &pv_list, std::vector<PointToPlane> &ptpl_list);
 
-  void build_single_residual(pointWithVar &pv, const VoxelOctoTree *current_octo, const int current_layer, bool &is_sucess, double &prob,
+  void build_single_residual(pointWithVar &pv, const VoxelOctoTree *current_octo, const int current_layer, bool &is_sucess, bool &is_surface, double &prob,
                              PointToPlane &single_ptpl);
 
   void pubVoxelMap();
+  void pubEffectiveVoxels();
 
   void mapSliding();
   void clearMemOutOfMap(const int& x_max,const int& x_min,const int& y_max,const int& y_min,const int& z_max,const int& z_min );
