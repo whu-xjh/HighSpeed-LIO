@@ -64,6 +64,7 @@ void loadVoxelConfig(ros::NodeHandle &nh, VoxelMapConfig &voxel_config)
   nh.param<double>("local_map/sliding_thresh", voxel_config.sliding_thresh, 8);
 
   nh.param<std::string>("uav/elevation_axis", voxel_config.elevation_axis_, "z");
+  nh.param<bool>("lio/pillar_voxel_en", voxel_config.pillar_voxel_en_, false);
 }
 
 void VoxelOctoTree::init_plane(const std::vector<pointWithVar> &points, VoxelPlane *plane)
@@ -679,21 +680,39 @@ void VoxelMapManager::UpdateGroundFlagForColumn(const VOXEL_COLUMN_LOCATION &col
   // 只有当柱子中有多于一个体素时，才进行地面体素标记
   if (column_voxels.size() > 1)
   {
-    // 找到指定轴上最小值的体素作为地面体素
+    // 找到指定轴上最小值且不高于传感器中心的体素作为地面体素
     auto bottom_voxel = column_voxels.begin()->second;
+    bool found_valid_ground = false;
+
     for (auto &voxel_pair : column_voxels)
     {
       double current_height = voxel_pair.second->voxel_center_[elevation_axis_index_] * elevation_multiplier_;
       double bottom_height = bottom_voxel->voxel_center_[elevation_axis_index_] * elevation_multiplier_;
-      if (current_height < bottom_height) {
-        bottom_voxel = voxel_pair.second;
+      double sensor_height = state_.pos_end[elevation_axis_index_] * elevation_multiplier_;
+
+      // 只有当体素不高于传感器中心时才考虑标记为地面体素
+      if (current_height <= sensor_height) {
+        if (!found_valid_ground || current_height < bottom_height) {
+          bottom_voxel = voxel_pair.second;
+          found_valid_ground = true;
+        }
       }
     }
-    bottom_voxel->is_ground_voxel_ = true;
+
+    // 只有找到有效地面体素时才标记
+    if (found_valid_ground) {
+      bottom_voxel->is_ground_voxel_ = true;
+    }
   }
   else {// 对于单个体素的情况
     auto single_voxel = column_voxels.begin()->second;
-    single_voxel->is_ground_voxel_ = true;
+    double voxel_height = single_voxel->voxel_center_[elevation_axis_index_] * elevation_multiplier_;
+    double sensor_height = state_.pos_end[elevation_axis_index_] * elevation_multiplier_;
+
+    // 只有当体素不高于传感器中心时才标记为地面体素
+    if (voxel_height <= sensor_height) {
+      single_voxel->is_ground_voxel_ = true;
+    }
   }
 }
 
@@ -817,7 +836,9 @@ void VoxelMapManager::BuildVoxelMap()
       voxel_map_[position]->temp_points_.push_back(p_v);
       voxel_map_[position]->new_points_++;
       voxel_map_[position]->layer_init_num_ = layer_init_num;
-      RegisterVoxelToColumn(position, voxel_map_[position]);
+      if (config_setting_.pillar_voxel_en_) {
+        RegisterVoxelToColumn(position, voxel_map_[position]);
+      }
     }
   }
 
@@ -875,7 +896,9 @@ void VoxelMapManager::UpdateVoxelMap(const std::vector<pointWithVar> &input_poin
       voxel_map_[position]->voxel_center_[1] = (0.5 + position.y) * voxel_size;
       voxel_map_[position]->voxel_center_[2] = (0.5 + position.z) * voxel_size;
       voxel_map_[position]->UpdateOctoTree(p_v);
-      RegisterVoxelToColumn(position, voxel_map_[position]);
+      if (config_setting_.pillar_voxel_en_) {
+        RegisterVoxelToColumn(position, voxel_map_[position]);
+      }
     }
   }
 }
@@ -972,8 +995,8 @@ void VoxelMapManager::BuildResidualListOMP(std::vector<pointWithVar> &pv_list, s
         auto iter_near = voxel_map_.find(near_position);
         if (iter_near != voxel_map_.end()) { build_single_residual(pv, iter_near->second, 0, is_sucess, is_surface, prob, single_ptpl); }
       }
-      
-      if (!current_octo->is_ground_voxel_ && hasAdjacentGroundVoxel(current_octo, position) >= 3)
+
+      if (config_setting_.pillar_voxel_en_ && !current_octo->is_ground_voxel_ && hasAdjacentGroundVoxel(current_octo, position) >= 3)
       {
         current_octo->is_ground_voxel_ = true;
       }
@@ -1029,7 +1052,7 @@ void VoxelMapManager::build_single_residual(pointWithVar &pv, const VoxelOctoTre
       J_nq.block<1, 3>(0, 3) = -plane.normal_;
       double sigma_l = J_nq * plane.plane_var_ * J_nq.transpose();
       sigma_l += plane.normal_.transpose() * pv.var * plane.normal_;
-      if (dis_to_plane < sigma_num * sqrt(sigma_l)) { is_surface = true; } // 如果点到平面的距离小于协方差的0.00001倍,则认为该点为平面点
+      if (dis_to_plane < sigma_num * sqrt(sigma_l)) { is_surface = true; } // 如果点到平面的距离小,则认为该点为平面点
       if (dis_to_plane < sigma_num * sqrt(sigma_l))
       {
         is_sucess = true;
@@ -1257,7 +1280,9 @@ void VoxelMapManager::clearMemOutOfMap(const int& x_max,const int& x_min,const i
       // delete it->second;
       VOXEL_LOCATION remove_loc = loc;
       VoxelOctoTree *voxel_ptr = it->second;
-      UnregisterVoxelFromColumn(remove_loc);
+      if(config_setting_.pillar_voxel_en_){
+        UnregisterVoxelFromColumn(remove_loc);
+      }
       delete voxel_ptr;
       it = voxel_map_.erase(it);
       // delete_time += omp_get_wtime() - last_delete_time;

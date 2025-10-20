@@ -60,6 +60,7 @@ lio:
   max_points_num: 64
   layer_init_num: [1, 1, 1, 1, 1]
   sigma_num: 3
+  pillar_voxel_en: true
 
 local_map:
   map_sliding_en: true
@@ -72,7 +73,7 @@ uav:
   elevation_axis: "-x"  # 可选值: "x", "-x", "y", "-y", "z", "-z"
 
 publish:
-  dense_map_en: true
+  dense_map_en: false
   pub_effect_en: true
   pub_plane_en: false
   pub_body_en: false  # 是否发布body坐标系下的点云
@@ -85,7 +86,7 @@ evo:
   pose_output_en: false
 
 lidar_save:
-  save_en: false
+  save_en: true
   laz_save_en: true
   colmap_output_en: false # need to set interval = -1
   filter_size_pcd: 0.15

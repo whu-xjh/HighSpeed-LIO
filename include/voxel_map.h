@@ -55,6 +55,10 @@ typedef struct VoxelMapConfig
 
   // config for elevation axis specification
   std::string elevation_axis_;
+
+  // config for pillow voxel
+  bool pillar_voxel_en_;
+
 } VoxelMapConfig;
 
 typedef struct PointToPlane
