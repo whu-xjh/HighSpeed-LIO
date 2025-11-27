@@ -58,6 +58,9 @@ typedef struct VoxelMapConfig
 
   // config for pillow voxel
   bool pillar_voxel_en_;
+  int min_adjacent_num_;  // 相邻地面体素数量阈值
+
+  int capacity;
 
 } VoxelMapConfig;
 
@@ -173,11 +176,12 @@ public:
   bool init_octo_;
   bool update_enable_;
   bool is_ground_voxel_ = false;
+  bool is_isolated_voxel_ = false;
   bool is_surface_voxel_ = false;
 
   VoxelOctoTree(int max_layer, int layer, int points_size_threshold, int max_points_num, float planer_threshold)
       : max_layer_(max_layer), layer_(layer), points_size_threshold_(points_size_threshold), max_points_num_(max_points_num),
-        planer_threshold_(planer_threshold), is_ground_voxel_(false)
+        planer_threshold_(planer_threshold), is_ground_voxel_(false), is_isolated_voxel_(false), is_surface_voxel_(false)
   {
     temp_points_.clear();
     octo_state_ = 0;
@@ -220,7 +224,12 @@ public:
   VoxelMapConfig config_setting_;
   int current_frame_id_ = 0;
   ros::Publisher voxel_map_pub_;
-  std::unordered_map<VOXEL_LOCATION, VoxelOctoTree *> voxel_map_;
+  
+  // LRU缓存相关（添加多线程保护）
+  std::mutex voxel_cache_mutex_;  // 缓存访问互斥锁
+  std::list<std::pair<VOXEL_LOCATION, VoxelOctoTree*>> voxel_map_cache_;
+  std::unordered_map<VOXEL_LOCATION, std::list<std::pair<VOXEL_LOCATION, VoxelOctoTree*>>::iterator> voxel_map_;
+
   std::unordered_map<VOXEL_COLUMN_LOCATION, std::map<int64_t, VoxelOctoTree *>> column_voxels_;
 
   PointCloudXYZI::Ptr feats_undistort_;
@@ -254,8 +263,11 @@ public:
   // 邻域体素偏移量查询表 (8邻域)
   std::vector<std::pair<int, int>> horizontal_neighbor_offsets_;
 
-  VoxelMapManager(VoxelMapConfig &config_setting, std::unordered_map<VOXEL_LOCATION, VoxelOctoTree *> &voxel_map)
-      : config_setting_(config_setting), voxel_map_(voxel_map)
+  // LRU缓存相关函数
+  // VoxelMapManager(VoxelMapConfig &config_setting, std::unordered_map<VOXEL_LOCATION, VoxelOctoTree *> &voxel_map)
+  //     : config_setting_(config_setting), voxel_map_(voxel_map)
+  VoxelMapManager(VoxelMapConfig &config_setting, std::unordered_map<VOXEL_LOCATION, std::list<std::pair<VOXEL_LOCATION, VoxelOctoTree*>>::iterator> &voxel_map)
+    : config_setting_(config_setting), voxel_map_(voxel_map)
   {
     current_frame_id_ = 0;
     feats_undistort_.reset(new PointCloudXYZI());
@@ -306,7 +318,6 @@ public:
                              PointToPlane &single_ptpl);
 
   void pubVoxelMap();
-  void pubEffectiveVoxels();
 
   void mapSliding();
   void clearMemOutOfMap(const int& x_max,const int& x_min,const int& y_max,const int& y_min,const int& z_max,const int& z_min );

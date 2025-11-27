@@ -2,9 +2,9 @@ common:
   img_topic: "/left_camera/image"
   lid_topic: "/livox/lidar"
   imu_topic: "/livox/imu"
-  img_en: 1
+  img_en: 0
   lidar_en: 1
-  ros_driver_bug_fix: false
+  ros_driver_bug_fix: true
 
 extrin_calib:
   extrinsic_T: [0.04165, 0.02326, -0.0284]
@@ -29,7 +29,7 @@ preprocess:
 vio:
   max_iterations: 5
   outlier_threshold: 1000 # 78 100 156 #100 200 500 700 infinite
-  img_point_cov: 100 # 100 1000 
+  img_point_cov: 100 # 100 1000
   patch_size: 8
   patch_pyrimid_level: 4
   normal_en: true
@@ -37,6 +37,7 @@ vio:
   inverse_composition_en: false
   exposure_estimate_en: true
   inv_expo_cov: 0.1
+  capacity: 10000 # LRU cache capacity for visual feature map (0 = disable LRU cache)
 
 imu:
   imu_en: true
@@ -55,6 +56,7 @@ lio:
   max_layer: 2
   max_points_num: 50
   layer_init_num: [5, 5, 5, 5, 5]
+  capacity: 10000  # LRU缓存容量 (0 = 禁用LRU缓存)
 
 local_map:  
   map_sliding_en: false
@@ -66,20 +68,24 @@ uav:
   gravity_align_en: false
 
 publish:
-  dense_map_en: false
+  dense_map_en: true
   pub_effect_point_en: false 
   pub_plane_en: false
   pub_scan_num: 1
   blind_rgb_points: 0.0
 
-evo:
-  seq_name: "CBD_Building_01"
-  pose_output_en: false
-
-pcd_save:
+lidar_save:
   save_en: false
   colmap_output_en: false # need to set interval = -1
   filter_size_pcd: 0.15
   interval: -1
   # how many LiDAR frames saved in each pcd file;
   # -1 : all frames will be saved in ONE pcd file, may lead to memory crash when having too much frames.
+
+external_imu:
+  enable: false  # 是否启用外置IMU
+  time_offset: 0  # 外置IMU时间偏移(秒)
+  buffer_size: 100000  # external IMU buffer大小
+  external_R : [0, 0, -1, 1, 0, 0, 0, -1, 0]
+  external_T : [0, 0, 0]
+  external_imu_only: false # 是否动态启动

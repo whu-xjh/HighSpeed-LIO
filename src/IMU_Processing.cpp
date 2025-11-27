@@ -102,6 +102,8 @@ void ImuProcess::set_acc_bias_cov(const V3D &b_a) { cov_bias_acc = b_a; }
 
 void ImuProcess::set_imu_init_frame_num(const int &num) { MAX_INI_COUNT = num; }
 
+void ImuProcess::set_external_imu_init_frame_num(const int &num) { MAX_EXTERNAL_INI_COUNT = num; }
+
 void ImuProcess::IMU_init(const MeasureGroup &meas, StatesGroup &state_inout, int &N)
 {
   /** 1. initializing the gravity, gyro bias, acc and gyro covariance
@@ -330,7 +332,7 @@ ExternalIMUData ImuProcess::interpolateExternalIMU(const ExternalIMUData &prev_i
   return interpolated_imu;
 }
 
-void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_inout, PointCloudXYZI &pcl_out, deque<ExternalIMUData> external_imu_buffer, bool external_imu_enable)
+void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_inout, PointCloudXYZI &pcl_out, deque<ExternalIMUData> external_imu_buffer, bool external_imu_enable, bool external_imu_only)
 {
   double t0 = omp_get_wtime();
   pcl_out.clear();
@@ -554,8 +556,9 @@ void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_
       V3D external_velocity_transformed = R_imu * interpolated_external_imu.linear_velocity;
 
       // 在IMU初始化阶段，优先使用外置IMU数据
-      if (imu_need_init) {
-        std::cout << "[ IMU Init ] Using external IMU velocity during initialization" << std::endl;
+      if (imu_need_init || external_imu_only) {
+        if (imu_need_init) std::cout << "[ IMU Init ] Using external IMU velocity during initialization" << std::endl;
+        if (external_imu_only) std::cout << "[ Odom Integration ] Using external IMU velocity only" << std::endl;
         state_inout.vel_end = external_velocity_transformed;
       } else {
         // 正常运行时，融合内外置IMU数据
@@ -694,7 +697,7 @@ void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_
   // printf("[ IMU ] time forward: %lf, backward: %lf.\n", t1 - t0, omp_get_wtime() - t1);
 }
 
-void ImuProcess::Process2(LidarMeasureGroup &lidar_meas, StatesGroup &stat, PointCloudXYZI::Ptr cur_pcl_un_, deque<ExternalIMUData> external_imu_buffer, bool external_imu_enable)
+void ImuProcess::Process2(LidarMeasureGroup &lidar_meas, StatesGroup &stat, PointCloudXYZI::Ptr cur_pcl_un_, deque<ExternalIMUData> external_imu_buffer, bool external_imu_enable, bool external_imu_only)
 {
   double t1, t2, t3;
   t1 = omp_get_wtime();
@@ -736,13 +739,13 @@ void ImuProcess::Process2(LidarMeasureGroup &lidar_meas, StatesGroup &stat, Poin
     }
 
     // 去畸变点云核心函数
-    UndistortPcl(lidar_meas, stat, *cur_pcl_un_, external_imu_buffer, external_imu_enable);
+    // UndistortPcl(lidar_meas, stat, *cur_pcl_un_, external_imu_buffer, external_imu_enable, external_imu_only);
     // cout << "[ IMU ] undistorted point num: " << cur_pcl_un_->size() << endl;
 
     return;
   }
 
   // 去畸变点云核心函数
-  UndistortPcl(lidar_meas, stat, *cur_pcl_un_, external_imu_buffer, external_imu_enable);
+  UndistortPcl(lidar_meas, stat, *cur_pcl_un_, external_imu_buffer, external_imu_enable, external_imu_only);
   // cout << "[ IMU ] undistorted point num: " << cur_pcl_un_->size() << endl;
 }
