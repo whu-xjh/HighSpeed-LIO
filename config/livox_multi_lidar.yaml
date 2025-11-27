@@ -80,7 +80,7 @@ uav:
   gravity_align_en: true
 
 publish:
-  dense_map_en: false
+  dense_map_en: true
   pub_effect_en: true
   pub_plane_en: false
   pub_body_en: false  # 是否发布body坐标系下的点云
