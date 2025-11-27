@@ -50,10 +50,10 @@ public:
   double external_imu_time_offset = 0.0;
   double last_external_imu_time = -1.0;
   int external_imu_buffer_size = 1000;
-  bool external_imu_only = false;
   ros::Subscriber sub_external_imu;
   string external_imu_topic;
   void odom_cbk(const nav_msgs::Odometry::ConstPtr &msg_in);
+  void cleanExternalIMUBuffer(double current_time);
   
   // 外置IMU外参
   V3D external_imu_T;
@@ -113,11 +113,7 @@ private:
   std::condition_variable sig_buffer;
 
   SLAM_MODE slam_mode_;
-  
-  // LRU cache structures for VoxelMapManager
-  // std::unordered_map<VOXEL_LOCATION, VoxelOctoTree *> voxel_map;
-  std::list<std::pair<VOXEL_LOCATION, VoxelOctoTree*>> voxel_map_cache_;
-  std::unordered_map<VOXEL_LOCATION, std::list<std::pair<VOXEL_LOCATION, VoxelOctoTree*>>::iterator> voxel_map_;
+  std::unordered_map<VOXEL_LOCATION, VoxelOctoTree *> voxel_map;
   
   string root_dir;
   string lid_topic, imu_topic, seq_name, img_topic;
@@ -242,11 +238,6 @@ private:
   double aver_time_consu = 0;
   double aver_time_icp = 0;
   double aver_time_map_inre = 0;
-  double total_downsample_time = 0;
-  double total_icp_time = 0;
-  double total_update_voxel_map_time = 0;
-  double total_point_transform_time = 0;
-  double total_publish_save_time = 0;
   bool colmap_output_en = false;
   
   std::string session_timestamp_;

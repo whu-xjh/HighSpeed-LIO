@@ -18,7 +18,6 @@ which is included as part of this source code package.
 #include <opencv2/imgproc/imgproc_c.h>
 #include <pcl/filters/voxel_grid.h>
 #include <set>
-#include <mutex>
 #include <vikit/math_utils.h>
 #include <vikit/robust_cost.h>
 #include <vikit/vision.h>
@@ -124,15 +123,7 @@ public:
   MatrixXd K, H_sub_inv;
 
   ofstream fout_camera, fout_colmap;
-  
-  // OLD: Using old voxel map format
-  // unordered_map<VOXEL_LOCATION, VOXEL_POINTS *> feat_map;
-  // NEW: Using LRU cache format for visual feature map（添加多线程保护）
-  std::mutex feat_cache_mutex_;  // 特征缓存访问互斥锁
-  unordered_map<VOXEL_LOCATION, std::list<std::pair<VOXEL_LOCATION, VOXEL_POINTS*>>::iterator> feat_map;
-  std::list<std::pair<VOXEL_LOCATION, VOXEL_POINTS*>> feat_map_cache;
-  int capacity;
-
+  unordered_map<VOXEL_LOCATION, VOXEL_POINTS *> feat_map;
   unordered_map<VOXEL_LOCATION, int> sub_feat_map; 
   unordered_map<int, Warp *> warp_map;
   vector<VisualPoint *> retrieve_voxel_points;
@@ -151,17 +142,8 @@ public:
   ~VIOManager();
   void updateStateInverse(cv::Mat img, int level);
   void updateState(cv::Mat img, int level);
-  
-  // OLD: Using old voxel map format (unordered_map<VOXEL_LOCATION, VoxelOctoTree*>)
-  // void processFrame(cv::Mat &img, vector<pointWithVar> &pg, const unordered_map<VOXEL_LOCATION, VoxelOctoTree *> &feat_map, double img_time);
-  // NEW: Using new LRU cache voxel map format (unordered_map<VOXEL_LOCATION, std::list<...>::iterator>)
-  void processFrame(cv::Mat &img, vector<pointWithVar> &pg, const std::unordered_map<VOXEL_LOCATION, std::list<std::pair<VOXEL_LOCATION, VoxelOctoTree*>>::iterator> &voxel_map, double img_time);
-  
-  // OLD: Using old voxel map format
-  // void retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &pg, const unordered_map<VOXEL_LOCATION, VoxelOctoTree *> &plane_map);
-  // NEW: Using new LRU cache voxel map format
-  void retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &pg, const std::unordered_map<VOXEL_LOCATION, std::list<std::pair<VOXEL_LOCATION, VoxelOctoTree*>>::iterator> &plane_map);
-  
+  void processFrame(cv::Mat &img, vector<pointWithVar> &pg, const unordered_map<VOXEL_LOCATION, VoxelOctoTree *> &feat_map, double img_time);
+  void retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &pg, const unordered_map<VOXEL_LOCATION, VoxelOctoTree *> &plane_map);
   void generateVisualMapPoints(cv::Mat img, vector<pointWithVar> &pg);
   void setImuToLidarExtrinsic(const V3D &transl, const M3D &rot);
   void setLidarToCameraExtrinsic(vector<double> &R, vector<double> &P);
@@ -181,14 +163,8 @@ public:
   void insertPointIntoVoxelMap(VisualPoint *pt_new);
   void plotTrackedPoints();
   void updateFrameState(StatesGroup state);
-  
-  // OLD: Using old voxel map format
-  // void projectPatchFromRefToCur(const unordered_map<VOXEL_LOCATION, VoxelOctoTree *> &plane_map);
-  // void updateReferencePatch(const unordered_map<VOXEL_LOCATION, VoxelOctoTree *> &plane_map);
-  // NEW: Using new LRU cache voxel map format
-  void projectPatchFromRefToCur(const std::unordered_map<VOXEL_LOCATION, std::list<std::pair<VOXEL_LOCATION, VoxelOctoTree*>>::iterator> &plane_map);
-  void updateReferencePatch(const std::unordered_map<VOXEL_LOCATION, std::list<std::pair<VOXEL_LOCATION, VoxelOctoTree*>>::iterator> &plane_map);
-  
+  void projectPatchFromRefToCur(const unordered_map<VOXEL_LOCATION, VoxelOctoTree *> &plane_map);
+  void updateReferencePatch(const unordered_map<VOXEL_LOCATION, VoxelOctoTree *> &plane_map);
   void precomputeReferencePatches(int level);
   void dumpDataForColmap();
   double calculateNCC(float *ref_patch, float *cur_patch, int patch_size);

@@ -45,12 +45,12 @@ ProcessorCount(N)
 message(STATUS "Processor count: ${N}")
 
 # Set the number of cores for multithreading
-if(N GREATER 4)
-  math(EXPR PROC_NUM "4")
+if(N GREATER 8)
+  math(EXPR PROC_NUM "8")
   add_definitions(-DMP_EN -DMP_PROC_NUM=${PROC_NUM})
   message(STATUS "Multithreading enabled. Cores: ${PROC_NUM}")
-elseif(N GREATER 2)
-  math(EXPR PROC_NUM "2")
+elseif(N GREATER 4)
+  math(EXPR PROC_NUM "4")
   add_definitions(-DMP_EN -DMP_PROC_NUM=${PROC_NUM})
   message(STATUS "Multithreading enabled. Cores: ${PROC_NUM}")
 elseif(N GREATER 1)
@@ -99,7 +99,7 @@ find_package(catkin REQUIRED COMPONENTS
 
 find_package(Eigen3 REQUIRED)
 find_package(PCL REQUIRED)
-find_package(OpenCV 4.8 REQUIRED)
+find_package(OpenCV REQUIRED)
 find_package(Sophus REQUIRED)
 find_package(Boost REQUIRED COMPONENTS thread)
 

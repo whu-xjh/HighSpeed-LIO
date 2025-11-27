@@ -58,7 +58,6 @@ void loadVoxelConfig(ros::NodeHandle &nh, VoxelMapConfig &voxel_config)
   nh.param<vector<int>>("lio/layer_init_num", voxel_config.layer_init_num_, vector<int>{5,5,5,5,5});
   nh.param<int>("lio/max_points_num", voxel_config.max_points_num_, 50);
   nh.param<int>("lio/max_iterations", voxel_config.max_iterations_, 5);
-  nh.param<int>("lio/capacity", voxel_config.capacity, 100000);
 
   nh.param<bool>("local_map/map_sliding_en", voxel_config.map_sliding_en, false);
   nh.param<int>("local_map/half_map_size", voxel_config.half_map_size, 100);
@@ -439,11 +438,15 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
 
   bool flg_EKF_inited, flg_EKF_converged, EKF_stop_flg = 0;
 
+  // 添加最小residual跟踪
+  double min_average_residual = std::numeric_limits<double>::max();
+  StatesGroup best_state = state_;
+  int best_iteration = 0;
+
   for (int iterCount = 0; iterCount < config_setting_.max_iterations_; iterCount++)
   {
-    double total_residual = 0.0;
-
     // 将点云从传感器坐标系下变换到世界坐标系下
+    double total_residual = 0.0;
     pcl::PointCloud<pcl::PointXYZI>::Ptr world_lidar(new pcl::PointCloud<pcl::PointXYZI>);
     TransformLidar(state_.rot_end, state_.pos_end, feats_down_body_, world_lidar);
     M3D rot_var = state_.cov.block<3, 3>(0, 0);
@@ -479,6 +482,13 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
     }
     effct_feat_num_ = ptpl_list_.size();
     double current_average_residual = total_residual / effct_feat_num_;
+
+    // 检查是否为最小的average residual
+    if (current_average_residual < min_average_residual) {
+      min_average_residual = current_average_residual;
+      best_state = state_;  // 保存当前状态为最佳状态
+      best_iteration = iterCount;
+    }
 
     cout << "[ LIO ] Raw feature num: " << feats_undistort_->size() << ", downsampled feature num:" << feats_down_size_
          << ", effective feature num: " << effct_feat_num_ << ", average residual: " << current_average_residual
@@ -585,6 +595,13 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
       EKF_stop_flg = true;
     }
     if (EKF_stop_flg) break;
+  }
+
+  // 在所有迭代完成后，应用最小average residual对应的状态
+  if (best_iteration != config_setting_.max_iterations_ - 1) {
+    cout << "[ LIO ] Applying best state from iteration " << best_iteration + 1
+         << " with residual " << min_average_residual << endl;
+    state_ = best_state;
   }
 
   // double t3 = omp_get_wtime();
@@ -753,7 +770,6 @@ void VoxelMapManager::UnregisterVoxelFromColumn(const VOXEL_LOCATION &position)
   }
 }
 
-// LRU
 // 仅在系统首次运行时执行，用于构建初始体素地图，为后续ICP配准提供参考
 void VoxelMapManager::BuildVoxelMap()
 {
@@ -805,38 +821,23 @@ void VoxelMapManager::BuildVoxelMap()
     if (iter != voxel_map_.end())
     {
       // 如果体素已经存在，则直接将点加入该体素
-      // voxel_map_[position]->temp_points_.push_back(p_v);
-      // voxel_map_[position]->new_points_++;
-      iter->second->second->temp_points_.push_back(p_v); // 修改这里
-      iter->second->second->new_points_++;
+      voxel_map_[position]->temp_points_.push_back(p_v);
+      voxel_map_[position]->new_points_++;
     }
     else
     {
       // 如果体素不存在，则新建体素并加入点
       VoxelOctoTree *octo_tree = new VoxelOctoTree(max_layer, 0, layer_init_num[0], max_points_num, planer_threshold);
-      // voxel_map_[position] = octo_tree;
-      // voxel_map_[position]->quater_length_ = voxel_size / 4;
-      // voxel_map_[position]->voxel_center_[0] = (0.5 + position.x) * voxel_size;
-      // voxel_map_[position]->voxel_center_[1] = (0.5 + position.y) * voxel_size;
-      // voxel_map_[position]->voxel_center_[2] = (0.5 + position.z) * voxel_size;
-      // voxel_map_[position]->temp_points_.push_back(p_v);
-      // voxel_map_[position]->new_points_++;
-      // voxel_map_[position]->layer_init_num_ = layer_init_num;
-      // if (config_setting_.pillar_voxel_en_) {
-      //   RegisterVoxelToColumn(position, voxel_map_[position]);
-      // }
-
-      voxel_map_cache_.emplace_front(position, octo_tree); // 修改这里
-      voxel_map_.insert({position, voxel_map_cache_.begin()});
-      voxel_map_cache_.begin()->second->quater_length_ = voxel_size / 4;
-      voxel_map_cache_.begin()->second->voxel_center_[0] = (0.5 + position.x) * voxel_size;
-      voxel_map_cache_.begin()->second->voxel_center_[1] = (0.5 + position.y) * voxel_size;
-      voxel_map_cache_.begin()->second->voxel_center_[2] = (0.5 + position.z) * voxel_size;
-      voxel_map_cache_.begin()->second->temp_points_.push_back(p_v);
-      voxel_map_cache_.begin()->second->new_points_++;
-      voxel_map_cache_.begin()->second->layer_init_num_ = layer_init_num;
+      voxel_map_[position] = octo_tree;
+      voxel_map_[position]->quater_length_ = voxel_size / 4;
+      voxel_map_[position]->voxel_center_[0] = (0.5 + position.x) * voxel_size;
+      voxel_map_[position]->voxel_center_[1] = (0.5 + position.y) * voxel_size;
+      voxel_map_[position]->voxel_center_[2] = (0.5 + position.z) * voxel_size;
+      voxel_map_[position]->temp_points_.push_back(p_v);
+      voxel_map_[position]->new_points_++;
+      voxel_map_[position]->layer_init_num_ = layer_init_num;
       if (config_setting_.pillar_voxel_en_) {
-        RegisterVoxelToColumn(position, voxel_map_cache_.begin()->second);
+        RegisterVoxelToColumn(position, voxel_map_[position]);
       }
     }
   }
@@ -844,8 +845,7 @@ void VoxelMapManager::BuildVoxelMap()
   // 4.八叉树初始化阶段,遍历所有体素,对每个体素进行八叉树初始化
   for (auto iter = voxel_map_.begin(); iter != voxel_map_.end(); ++iter)
   {
-    // iter->second->init_octo_tree();
-    iter->second->second->init_octo_tree(); // 修改这里
+    iter->second->init_octo_tree();
   }
 }
 
@@ -877,7 +877,6 @@ void VoxelMapManager::UpdateVoxelMap(const std::vector<pointWithVar> &input_poin
   for (uint i = 0; i < plsize; i++)
   {
     const pointWithVar p_v = input_points[i];
-    // 计算voxel坐标
     float loc_xyz[3];
     for (int j = 0; j < 3; j++)
     {
@@ -886,59 +885,20 @@ void VoxelMapManager::UpdateVoxelMap(const std::vector<pointWithVar> &input_poin
     }
     VOXEL_LOCATION position((int64_t)loc_xyz[0], (int64_t)loc_xyz[1], (int64_t)loc_xyz[2]);
     auto iter = voxel_map_.find(position);
-    if (iter != voxel_map_.end()) 
-    { 
-      // voxel_map_[position]->UpdateOctoTree(p_v); 
-      iter->second->second->UpdateOctoTree(p_v); // 修改这里
-      voxel_map_cache_.splice(voxel_map_cache_.begin(), voxel_map_cache_, iter->second); // 更新值并移动到头部 修改这里
-    }
+    if (iter != voxel_map_.end()) { voxel_map_[position]->UpdateOctoTree(p_v); }
     else
     {
       VoxelOctoTree *octo_tree = new VoxelOctoTree(max_layer, 0, layer_init_num[0], max_points_num, planer_threshold);
-      // voxel_map_[position] = octo_tree;
-      // voxel_map_[position]->layer_init_num_ = layer_init_num;
-      // voxel_map_[position]->quater_length_ = voxel_size / 4;
-      // voxel_map_[position]->voxel_center_[0] = (0.5 + position.x) * voxel_size;
-      // voxel_map_[position]->voxel_center_[1] = (0.5 + position.y) * voxel_size;
-      // voxel_map_[position]->voxel_center_[2] = (0.5 + position.z) * voxel_size;
-      // voxel_map_[position]->UpdateOctoTree(p_v);
-      // if (config_setting_.pillar_voxel_en_) {
-      //   RegisterVoxelToColumn(position, voxel_map_[position]);
-      // }
-
-      // 修改这里
-      octo_tree->quater_length_ = voxel_size / 4;
-      octo_tree->voxel_center_[0] = (0.5 + position.x) * voxel_size;
-      octo_tree->voxel_center_[1] = (0.5 + position.y) * voxel_size;
-      octo_tree->voxel_center_[2] = (0.5 + position.z) * voxel_size;
-      octo_tree->temp_points_.push_back(p_v); 
-      octo_tree->new_points_++; 
-      octo_tree->layer_init_num_ = layer_init_num;
-
-      // 插入新节点到头部 
-      voxel_map_cache_.emplace_front(position, octo_tree);
-      voxel_map_.insert({position, voxel_map_cache_.begin()});
-      
-      // 处理柱状体素
+      voxel_map_[position] = octo_tree;
+      voxel_map_[position]->layer_init_num_ = layer_init_num;
+      voxel_map_[position]->quater_length_ = voxel_size / 4;
+      voxel_map_[position]->voxel_center_[0] = (0.5 + position.x) * voxel_size;
+      voxel_map_[position]->voxel_center_[1] = (0.5 + position.y) * voxel_size;
+      voxel_map_[position]->voxel_center_[2] = (0.5 + position.z) * voxel_size;
+      voxel_map_[position]->UpdateOctoTree(p_v);
       if (config_setting_.pillar_voxel_en_) {
-        RegisterVoxelToColumn(position, octo_tree);
+        RegisterVoxelToColumn(position, voxel_map_[position]);
       }
-    }
-  }
-
-  // 容量检查，删除尾部节点（当capacity > 0时才进行LRU缓存管理）
-  if (config_setting_.capacity > 0)
-  {
-    while (voxel_map_cache_.size() >= config_setting_.capacity)
-    {
-      delete voxel_map_cache_.back().second;
-      auto last_key = voxel_map_cache_.back().first;
-      // 从柱状体素中注销
-      if (config_setting_.pillar_voxel_en_) {
-        UnregisterVoxelFromColumn(last_key);
-      }
-      voxel_map_.erase(last_key);
-      voxel_map_cache_.pop_back();
     }
   }
 }
@@ -954,7 +914,6 @@ void VoxelMapManager::BuildResidualListOMP(std::vector<pointWithVar> &pv_list, s
   std::vector<PointToPlane> all_ptpl_list(pv_list.size());
   std::vector<bool> useful_ptpl(pv_list.size());
   std::vector<size_t> index(pv_list.size());
-
   for (size_t i = 0; i < index.size(); ++i)
   {
     index[i] = i;
@@ -985,8 +944,7 @@ void VoxelMapManager::BuildResidualListOMP(std::vector<pointWithVar> &pv_list, s
     auto iter = voxel_map_.find(position);
     if (iter != voxel_map_.end()) // 如果找到体素
     {
-      // VoxelOctoTree *current_octo = iter->second; // 获取体素对应的八叉树节点
-      VoxelOctoTree *current_octo = iter->second->second; // 获取体素对应的八叉树节点 修改这里
+      VoxelOctoTree *current_octo = iter->second; // 获取体素对应的八叉树节点
       PointToPlane single_ptpl{}; // 存储当前点对应的平面信息
       bool is_sucess = false; // 标记是否成功找到平面
       bool is_surface = false; // 标记是否为非平面点
@@ -1035,7 +993,7 @@ void VoxelMapManager::BuildResidualListOMP(std::vector<pointWithVar> &pv_list, s
 
         // 在相邻体素中查找平面,如果找到则构建残差
         auto iter_near = voxel_map_.find(near_position);
-        if (iter_near != voxel_map_.end()) { build_single_residual(pv, (iter_near->second)->second, 0, is_sucess, is_surface, prob, single_ptpl); }
+        if (iter_near != voxel_map_.end()) { build_single_residual(pv, iter_near->second, 0, is_sucess, is_surface, prob, single_ptpl); }
       }
 
       if (config_setting_.pillar_voxel_en_ && !current_octo->is_ground_voxel_ && hasAdjacentGroundVoxel(current_octo, position) >= 3)
@@ -1157,8 +1115,7 @@ void VoxelMapManager::pubVoxelMap()
   std::vector<VoxelPlane> pub_plane_list;
   for (auto iter = voxel_map_.begin(); iter != voxel_map_.end(); iter++)
   {
-    // GetUpdatePlane(iter->second, config_setting_.max_layer_, pub_plane_list);
-    GetUpdatePlane(iter->second->second, config_setting_.max_layer_, pub_plane_list); // 修改这里
+    GetUpdatePlane(iter->second, config_setting_.max_layer_, pub_plane_list);
   }
   for (size_t i = 0; i < pub_plane_list.size(); i++)
   {
@@ -1322,16 +1279,11 @@ void VoxelMapManager::clearMemOutOfMap(const int& x_max,const int& x_min,const i
       // last_delete_time = omp_get_wtime();
       // delete it->second;
       VOXEL_LOCATION remove_loc = loc;
-      // VoxelOctoTree *voxel_ptr = it->second;
-      VoxelOctoTree *voxel_ptr = it->second->second; // 修改这里
+      VoxelOctoTree *voxel_ptr = it->second;
       if(config_setting_.pillar_voxel_en_){
         UnregisterVoxelFromColumn(remove_loc);
       }
       delete voxel_ptr;
-
-      // 从LRU缓存中删除（直接通过迭代器删除，时间复杂度O(1)）
-      voxel_map_cache_.erase(it->second);
-
       it = voxel_map_.erase(it);
       // delete_time += omp_get_wtime() - last_delete_time;
       delete_voxel_cout++;
@@ -1367,8 +1319,7 @@ int VoxelMapManager::hasAdjacentGroundVoxel(VoxelOctoTree *current_octo, const V
     // 在voxel_map中查找相邻体素
     auto iter = voxel_map_.find(adjacent_pos);
     if (iter != voxel_map_.end()) {
-      // VoxelOctoTree *adjacent_voxel = iter->second;
-      VoxelOctoTree *adjacent_voxel = iter->second->second; // 修改这里
+      VoxelOctoTree *adjacent_voxel = iter->second;
       if (adjacent_voxel != nullptr && adjacent_voxel->is_ground_voxel_) {
         adjacent_ground_count++;
       }

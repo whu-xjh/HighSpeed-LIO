@@ -33,10 +33,10 @@ LIVMapper::LIVMapper(ros::NodeHandle &nh)
 
   // Start LAZ save worker thread
   laz_save_thread_ = std::thread(&LIVMapper::lazSaveWorker, this);
-
+  
   p_pre.reset(new Preprocess());
   p_imu.reset(new ImuProcess());
-
+  
   readParameters(nh);
 
   VoxelMapConfig voxel_config;
@@ -52,7 +52,7 @@ LIVMapper::LIVMapper(ros::NodeHandle &nh)
   pcl_wait_save_intensity.reset(new PointCloudXYZI());
   laserCloudWorldRGB_shared.reset(new PointCloudXYZRGB());
   ptpl_list_wait_save.clear();
-  voxelmap_manager.reset(new VoxelMapManager(voxel_config, voxel_map_));
+  voxelmap_manager.reset(new VoxelMapManager(voxel_config, voxel_map));
   vio_manager.reset(new VIOManager());
   root_dir = ROOT_DIR;
   initializeFiles();
@@ -143,7 +143,8 @@ void LIVMapper::readParameters(ros::NodeHandle &nh)
   nh.param<bool>("external_imu/enable", external_imu_enable, false);
   nh.param<double>("external_imu/time_offset", external_imu_time_offset, 0.0);
   nh.param<int>("external_imu/buffer_size", external_imu_buffer_size, 1000);
-  nh.param<bool>("external_imu/external_imu_only", external_imu_only, false);
+  
+  // 读取外置IMU外参
   nh.param<vector<double>>("external_imu/external_T", external_imu_T_vec, vector<double>());
   nh.param<vector<double>>("external_imu/external_R", external_imu_R_vec, vector<double>());
 
@@ -297,7 +298,6 @@ void LIVMapper::handleFirstFrame()
 
 void LIVMapper::gravityAlignment() 
 {
-  // 统一垂直参考，确保z轴负方向与重力方向一致
   if (!p_imu->imu_need_init && !gravity_align_finished) 
   {
     std::cout << "Gravity Alignment Starts" << std::endl;
@@ -318,7 +318,7 @@ void LIVMapper::processImu()
 {
   // double t0 = omp_get_wtime();
 
-  p_imu->Process2(LidarMeasures, _state, feats_undistort, external_imu_buffer, external_imu_enable, external_imu_only); // 调用IMU处理模块，传入external IMU buffer和启用状态
+  p_imu->Process2(LidarMeasures, _state, feats_undistort, external_imu_buffer, external_imu_enable); // 调用IMU处理模块，传入external IMU buffer和启用状态
 
   if (gravity_align_en) gravityAlignment();
 
@@ -384,14 +384,6 @@ void LIVMapper::handleVIO()
   {
     vio_manager->plot_flag = false;
   }
-
-  // Original code: vio_manager->processFrame(LidarMeasures.measures.back().img, _pv_list, voxelmap_manager->voxel_map_, LidarMeasures.last_lio_update_time - _first_lidar_time);
-  // Convert LRU cache to old format for VIOManager compatibility
-  // std::unordered_map<VOXEL_LOCATION, VoxelOctoTree*> feat_map;
-  // for (const auto& pair : voxelmap_manager->voxel_map_) {
-  //   feat_map[pair.first] = (pair.second)->second;
-  // }
-  // vio_manager->processFrame(LidarMeasures.measures.back().img, _pv_list, feat_map, LidarMeasures.last_lio_update_time - _first_lidar_time);
 
   vio_manager->processFrame(LidarMeasures.measures.back().img, _pv_list, voxelmap_manager->voxel_map_, LidarMeasures.last_lio_update_time - _first_lidar_time);
 
@@ -491,7 +483,6 @@ void LIVMapper::handleLIO()
     - 将当前帧点云与地图中的平面对齐
     - 点到平面的距离作为观测量
     - 这个观测值用于校正IMU的预测
-
 
     3. 融合层 - 卡尔曼滤波（StateEstimation核心）
 
@@ -629,13 +620,6 @@ void LIVMapper::handleLIO()
   double t7 = omp_get_wtime();
   aver_time_consu = aver_time_consu * (frame_num - 1) / frame_num + (t7 - t0) / frame_num;
 
-  // Accumulate times for each step
-  total_downsample_time += (t_down - t0);
-  total_icp_time += (t2 - t1);
-  total_update_voxel_map_time += (t4 - t3);
-  total_point_transform_time += (t6 - t5);
-  total_publish_save_time += (t7 - t6);
-
   // aver_time_icp = aver_time_icp * (frame_num - 1) / frame_num + (t2 - t1) / frame_num;
   // aver_time_map_inre = aver_time_map_inre * (frame_num - 1) / frame_num + (t4 - t3) / frame_num;
   // aver_time_solve = aver_time_solve * (frame_num - 1) / frame_num + (solve_time) / frame_num;
@@ -651,13 +635,13 @@ void LIVMapper::handleLIO()
   printf("\033[1;34m+-------------------------------------------------------------+\033[0m\n");
   printf("\033[1;34m|                         LIO Mapping Time                    |\033[0m\n");
   printf("\033[1;34m+-------------------------------------------------------------+\033[0m\n");
-  printf("\033[1;34m| %-29s | %-13s %-13s |\033[0m\n", "Algorithm Stage", "Current", "Average");
+  printf("\033[1;34m| %-29s | %-27s |\033[0m\n", "Algorithm Stage", "Time (secs)");
   printf("\033[1;34m+-------------------------------------------------------------+\033[0m\n");
-  printf("\033[1;36m| %-29s | %-13f %-13f |\033[0m\n", "DownSample", t_down - t0, total_downsample_time / frame_num);
-  printf("\033[1;36m| %-29s | %-13f %-13f |\033[0m\n", "ICP", t2 - t1, total_icp_time / frame_num);
-  printf("\033[1;36m| %-29s | %-13f %-13f |\033[0m\n", "updateVoxelMap", t4 - t3, total_update_voxel_map_time / frame_num);
-  printf("\033[1;36m| %-29s | %-13f %-13f |\033[0m\n", "Point Transform", t6 - t5, total_point_transform_time / frame_num);
-  printf("\033[1;36m| %-29s | %-13f %-13f |\033[0m\n", "Publish and Save", t7 - t6, total_publish_save_time / frame_num);
+  printf("\033[1;36m| %-29s | %-27f |\033[0m\n", "DownSample", t_down - t0);
+  printf("\033[1;36m| %-29s | %-27f |\033[0m\n", "ICP", t2 - t1);
+  printf("\033[1;36m| %-29s | %-27f |\033[0m\n", "updateVoxelMap", t4 - t3);
+  printf("\033[1;36m| %-29s | %-27f |\033[0m\n", "Point Transform", t6 - t5);
+  printf("\033[1;36m| %-29s | %-27f |\033[0m\n", "Publish and Save", t7 - t6);
   printf("\033[1;34m+-------------------------------------------------------------+\033[0m\n");
   printf("\033[1;36m| %-29s | %-27f |\033[0m\n", "Current Total Time", t7 - t0);
   printf("\033[1;36m| %-29s | %-27f |\033[0m\n", "Average Total Time", aver_time_consu);
@@ -1000,8 +984,7 @@ void LIVMapper::imu_cbk(const sensor_msgs::Imu::ConstPtr &msg_in)
   if (last_timestamp_lidar < 0.0) return;
   // ROS_INFO("get imu at time: %.6f", msg_in->header.stamp.toSec());
   sensor_msgs::Imu::Ptr msg(new sensor_msgs::Imu(*msg_in));
-  // msg->header.stamp = ros::Time().fromSec(msg->header.stamp.toSec() - imu_time_offset);
-  msg->header.stamp = ros::Time().fromSec(msg->header.stamp.toSec() - imu_time_offset + (last_timestamp_lidar - msg->header.stamp.toSec() - imu_time_offset));
+  msg->header.stamp = ros::Time().fromSec(msg->header.stamp.toSec() - imu_time_offset);
   double timestamp = msg->header.stamp.toSec();
 
   if (fabs(last_timestamp_lidar - timestamp) > 0.5 && (!ros_driver_fix_en))
@@ -1570,8 +1553,6 @@ void LIVMapper::save_frame_world(const std::vector<PointToPlane> &ptpl_list)
       string file_extension = laz_save_en ? ".laz" : ".pcd";
       string all_points_dir(pcd_session_dir_ + "/" + to_string(pcd_index) + file_extension);
       
-      cout << "current scan saved to /PCD/" << all_points_dir << endl;
-
       if (laz_save_en) {
       // Queue LAZ save task to separate thread
       auto pcl_wait_save_intensity_copy = *pcl_wait_save_intensity;
@@ -1734,9 +1715,7 @@ VoxelOctoTree* LIVMapper::getVoxelForPoint(const V3D& point_w)
 
   if (iter != voxelmap_manager->voxel_map_.end())
   {
-    // Original code: return iter->second;
-    // iter->second is now an iterator to the cache list, need to dereference twice
-    return (iter->second)->second;
+    return iter->second;
   }
 
   return nullptr;
