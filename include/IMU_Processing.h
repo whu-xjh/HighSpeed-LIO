@@ -47,7 +47,7 @@ public:
   void disable_bias_est();
   void disable_exposure_est();
   void Process2(LidarMeasureGroup &lidar_meas, StatesGroup &stat, PointCloudXYZI::Ptr cur_pcl_un_, deque<ExternalIMUData> external_imu_buffer = deque<ExternalIMUData>(), bool external_imu_enable = false, bool external_imu_only = false);
-  void UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_inout, PointCloudXYZI &pcl_out, deque<ExternalIMUData> external_imu_buffer, bool external_imu_enable = false, bool external_imu_only = false);
+  void UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_inout, PointCloudXYZI &pcl_out, int &external_init_iter_num, deque<ExternalIMUData> external_imu_buffer, bool external_imu_enable = false, bool external_imu_only = false);
   pair<ExternalIMUData, ExternalIMUData> findClosestExternalIMUs(deque<ExternalIMUData> &external_imu_buffer, double target_time, double max_time_diff = 0.1);
   ExternalIMUData interpolateExternalIMU(const ExternalIMUData &prev_imu, const ExternalIMUData &next_imu, double target_time);
 
@@ -82,7 +82,7 @@ private:
   V3D acc_s_last;
   double last_prop_end_time;
   double time_last_scan;
-  int init_iter_num = 1, MAX_INI_COUNT = 20, MAX_EXTERNAL_INI_COUNT = 20;
+  int init_iter_num = 1, external_init_iter_num = 1, MAX_INI_COUNT = 20, MAX_EXTERNAL_INI_COUNT = 20;
   bool b_first_frame = true;
   bool imu_en = true;
   bool gravity_est_en = true;
