@@ -67,7 +67,6 @@ lio:
 pillar_voxel:
   pillar_voxel_en: true
   min_adjacent_num: 2      # 相邻地面体素数量阈值
-  min_adjacent_threshold: 0.5 # 相邻地面体素高度差阈值
   elevation_axis: "z"  # 可选值: "x", "-x", "y", "-y", "z", "-z"
 
 local_map: 

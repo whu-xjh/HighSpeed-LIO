@@ -11,4 +11,8 @@
 	<group if="$(arg rviz)">
 		<node launch-prefix="nice" pkg="rviz" type="rviz" name="rviz" args="-d $(find fast_livo)/rviz_cfg/hilti.rviz" />
 	</group>
+
+launch-prefix="gdb -ex run --args"
+launch-prefix="valgrind --leak-check=full"
+
 </launch> 	

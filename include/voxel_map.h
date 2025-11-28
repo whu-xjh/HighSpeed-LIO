@@ -128,6 +128,18 @@ public:
   bool operator==(const VOXEL_COLUMN_LOCATION &other) const { return (axis1 == other.axis1 && axis2 == other.axis2); }
 };
 
+// Pillar Voxel 信息数据结构
+class PillarVoxel
+{
+public:
+  int32_t total_voxel_count;         // 该pillar中的总voxel数量
+  bool has_ground_voxel;            // 是否包含地面体素
+  double ground_voxel_elevation;    // 地面体素的高程值
+
+  PillarVoxel() : total_voxel_count(0), has_ground_voxel(false),
+                   ground_voxel_elevation(0.0){}
+};
+
 // Hash value
 namespace std
 {
@@ -231,6 +243,9 @@ public:
   std::unordered_map<VOXEL_LOCATION, std::list<std::pair<VOXEL_LOCATION, VoxelOctoTree*>>::iterator> voxel_map_;
 
   std::unordered_map<VOXEL_COLUMN_LOCATION, std::map<int64_t, VoxelOctoTree *>> column_voxels_;
+
+  // Pillar voxel信息存储
+  std::unordered_map<VOXEL_COLUMN_LOCATION, PillarVoxel> pillar_voxel_info_;
 
   PointCloudXYZI::Ptr feats_undistort_;
   PointCloudXYZI::Ptr feats_down_body_;

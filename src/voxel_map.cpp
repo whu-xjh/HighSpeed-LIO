@@ -703,7 +703,7 @@ void VoxelMapManager::UpdateGroundFlagForColumn(const VOXEL_COLUMN_LOCATION &col
   else {// 对于单个体素的情况
     auto single_voxel = column_voxels.begin()->second;
     single_voxel->is_isolated_voxel_ = true;
-    // single_voxel->is_ground_voxel_ = true;
+    single_voxel->is_ground_voxel_ = true;
   }
 }
 
@@ -725,6 +725,7 @@ void VoxelMapManager::RegisterVoxelToColumn(const VOXEL_LOCATION &position, Voxe
     elevation_key = position.z;
   }
   column_voxels[elevation_key] = voxel;
+
   UpdateGroundFlagForColumn(column_key, column_voxels);
 }
 
