@@ -274,6 +274,7 @@ void LIVMapper::initializeSubscribersAndPublishers(ros::NodeHandle &nh, image_tr
   pubGroundCloud = nh.advertise<sensor_msgs::PointCloud2>("/cloud_ground", 100);
   pubSurfaceCloud = nh.advertise<sensor_msgs::PointCloud2>("/cloud_surface", 100);
   pubNonSurfaceCloud = nh.advertise<sensor_msgs::PointCloud2>("/cloud_non_surface", 100);
+  pubIsolatedCloud = nh.advertise<sensor_msgs::PointCloud2>("/cloud_isolated", 100);
   pubOdomAftMapped = nh.advertise<nav_msgs::Odometry>("/aft_mapped_to_init", 10);
   pubPath = nh.advertise<nav_msgs::Path>("/path", 10);
   plane_pub = nh.advertise<visualization_msgs::Marker>("/planner_normal", 1);
@@ -617,7 +618,7 @@ void LIVMapper::handleLIO()
   *pcl_w_wait_pub = *laserCloudWorld;
   double t6 = omp_get_wtime();
 
-  if (pub_voxel_points_en) publish_voxel_points(pubGroundCloud, pubSurfaceCloud, pubNonSurfaceCloud); // 基于体素类型分类发布点云
+  if (pub_voxel_points_en) publish_voxel_points(pubGroundCloud, pubSurfaceCloud, pubNonSurfaceCloud, pubIsolatedCloud); // 基于体素类型分类发布点云
   if (!img_en) publish_frame_world(pubLaserCloudFullRes, vio_manager); // 如果没有图像信息，发布点云
   if (pub_body_en) publish_frame_body(pubLaserCloudBody); // 发布机身坐标系下的点云
   if (pub_effect_en) publish_effect_world(pubLaserCloudEffect, voxelmap_manager->ptpl_list_); // 发布有效点云
@@ -1627,18 +1628,21 @@ void LIVMapper::publish_effect_world(const ros::Publisher &pubLaserCloudEffect, 
 
 void LIVMapper::publish_voxel_points(const ros::Publisher &pubGroundCloud,
                                      const ros::Publisher &pubSurfaceCloud,
-                                     const ros::Publisher &pubNonSurfaceCloud)
+                                     const ros::Publisher &pubNonSurfaceCloud,
+                                     const ros::Publisher &pubIsolatedCloud)
 {
   if (pcl_w_wait_pub->empty()) return;
 
   PointCloudXYZI::Ptr ground_cloud(new PointCloudXYZI());
   PointCloudXYZI::Ptr surface_cloud(new PointCloudXYZI());
   PointCloudXYZI::Ptr non_surface_cloud(new PointCloudXYZI());
+  PointCloudXYZI::Ptr isolated_cloud(new PointCloudXYZI());
 
   double voxel_size = voxelmap_manager->config_setting_.max_voxel_size_;
   int found_voxels = 0;
   int effective_voxels = 0;
   int ground_voxels = 0;
+  int isolated_voxels = 0;
 
   // 遍历所有点，根据体素类型分类
   for (const auto& point : pcl_w_wait_pub->points)
@@ -1661,8 +1665,14 @@ void LIVMapper::publish_voxel_points(const ros::Publisher &pubGroundCloud,
         effective_voxels++;
         surface_cloud->points.push_back(point);
       }
+
+      if (voxel->is_isolated_voxel_)
+      {
+        isolated_voxels++;
+        isolated_cloud->points.push_back(point);
+      }
       
-      if (!voxel->is_surface_voxel_ && !voxel->is_ground_voxel_)
+      if (!voxel->is_surface_voxel_ && !voxel->is_ground_voxel_ && !voxel->is_isolated_voxel_)
       {
         non_surface_cloud->points.push_back(point);
       }
@@ -1686,6 +1696,10 @@ void LIVMapper::publish_voxel_points(const ros::Publisher &pubGroundCloud,
   non_surface_cloud->width = non_surface_cloud->points.size();
   non_surface_cloud->height = 1;
   non_surface_cloud->is_dense = true;
+
+  isolated_cloud->width = isolated_cloud->points.size();
+  isolated_cloud->height = 1;
+  isolated_cloud->is_dense = true;
 
   // 发布点云
   if (!ground_cloud->empty())
@@ -1713,6 +1727,15 @@ void LIVMapper::publish_voxel_points(const ros::Publisher &pubGroundCloud,
     non_surface_msg.header.stamp = ros::Time::now();
     non_surface_msg.header.frame_id = "camera_init";
     pubNonSurfaceCloud.publish(non_surface_msg);
+  }
+
+  if (!isolated_cloud->empty())
+  {
+    sensor_msgs::PointCloud2 isolated_msg;
+    pcl::toROSMsg(*isolated_cloud, isolated_msg);
+    isolated_msg.header.stamp = ros::Time::now();
+    isolated_msg.header.frame_id = "camera_init";
+    pubIsolatedCloud.publish(isolated_msg);
   }
 }
 

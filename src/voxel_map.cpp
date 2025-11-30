@@ -703,7 +703,6 @@ void VoxelMapManager::UpdateGroundFlagForColumn(const VOXEL_COLUMN_LOCATION &col
   else {// 对于单个体素的情况
     auto single_voxel = column_voxels.begin()->second;
     single_voxel->is_isolated_voxel_ = true;
-    single_voxel->is_ground_voxel_ = true;
   }
 }
 
@@ -1007,6 +1006,7 @@ void VoxelMapManager::BuildResidualListOMP(std::vector<pointWithVar> &pv_list, s
         if (hasAdjacentGroundVoxel(current_octo, position) >= config_setting_.min_adjacent_num_)
         { 
           current_octo->is_ground_voxel_ = true;
+          current_octo->is_isolated_voxel_ = false;
           continue;
         }
         else

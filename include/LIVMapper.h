@@ -97,7 +97,8 @@ public:
   void publish_effect_world(const ros::Publisher &pubLaserCloudEffect, const std::vector<PointToPlane> &ptpl_list);
   void publish_voxel_points(const ros::Publisher &pubGroundCloud,
                           const ros::Publisher &pubSurfaceCloud,
-                          const ros::Publisher &pubNonSurfaceCloud);
+                          const ros::Publisher &pubNonSurfaceCloud,
+                          const ros::Publisher &pubIsolatedCloud);
   void publish_odometry(const ros::Publisher &pubOdomAftMapped);
   void publish_mavros(const ros::Publisher &mavros_pose_publisher);
   void publish_path(const ros::Publisher pubPath);
@@ -227,6 +228,7 @@ private:
   ros::Publisher pubGroundCloud;
   ros::Publisher pubSurfaceCloud;
   ros::Publisher pubNonSurfaceCloud;
+  ros::Publisher pubIsolatedCloud;
   ros::Publisher pubOdomAftMapped;
   ros::Publisher pubPath;
   ros::Publisher pubLaserCloudDyn;
