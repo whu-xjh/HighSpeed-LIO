@@ -651,7 +651,7 @@ void LIVMapper::handleLIO()
   //         t2 - t1, t4 - t3, t4 - t0, aver_time_icp, aver_time_map_inre, aver_time_consu);
 
   printf("\033[1;34m+-------------------------------------------------------------+\033[0m\n");
-  printf("\033[1;34m|                         LIO Mapping Time                    |\033[0m\n");
+  printf("\033[1;34m|                        LIO Mapping Time                     |\033[0m\n");
   printf("\033[1;34m+-------------------------------------------------------------+\033[0m\n");
   printf("\033[1;34m| %-29s | %-13s %-13s |\033[0m\n", "Algorithm Stage", "Current", "Average");
   printf("\033[1;34m+-------------------------------------------------------------+\033[0m\n");

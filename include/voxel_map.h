@@ -62,6 +62,8 @@ typedef struct VoxelMapConfig
 
   int capacity;
 
+  bool rf_enhance_en_;
+
 } VoxelMapConfig;
 
 typedef struct PointToPlane
@@ -244,8 +246,8 @@ public:
 
   std::unordered_map<VOXEL_COLUMN_LOCATION, std::map<int64_t, VoxelOctoTree *>> column_voxels_;
 
-  // Pillar voxel信息存储
-  std::unordered_map<VOXEL_COLUMN_LOCATION, PillarVoxel> pillar_voxel_info_;
+  // Pillar voxel存储s
+  std::unordered_map<VOXEL_COLUMN_LOCATION, PillarVoxel> pillar_voxel_;
 
   PointCloudXYZI::Ptr feats_undistort_;
   PointCloudXYZI::Ptr feats_down_body_;
@@ -275,8 +277,8 @@ public:
   int elevation_axis_index_;  // 0=x, 1=y, 2=z
   double elevation_multiplier_; // 1.0 or -1.0
 
-  // 邻域体素偏移量查询表 (8邻域)
-  std::vector<std::pair<int, int>> horizontal_neighbor_offsets_;
+  // 3D邻域偏移量
+  std::vector<VOXEL_LOCATION> precomputed_neighbor_offsets_;
 
   // LRU缓存相关函数
   // VoxelMapManager(VoxelMapConfig &config_setting, std::unordered_map<VOXEL_LOCATION, VoxelOctoTree *> &voxel_map)

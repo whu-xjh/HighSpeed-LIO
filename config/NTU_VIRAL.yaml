@@ -2,7 +2,7 @@ common:
   img_topic: "/left/image_raw"
   lid_topic: "/os1_cloud_node1/points"
   imu_topic: "/imu/imu"
-  img_en: 0
+  img_en: 1
   lidar_en: 1
   ros_driver_bug_fix: false
 

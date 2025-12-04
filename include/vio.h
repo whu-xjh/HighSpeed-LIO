@@ -117,6 +117,13 @@ public:
   // double ave_build_residual_time = 0;
   // double ave_ekf_time = 0;
 
+  // VIO timing accumulation variables
+  double total_retrieve_time = 0;
+  double total_compute_jacobian_ekf_time = 0;
+  double total_generate_visual_points_time = 0;
+  double total_update_visual_points_time = 0;
+  double total_update_reference_patch_time = 0;
+
   int frame_count = 0;
   bool plot_flag;
 

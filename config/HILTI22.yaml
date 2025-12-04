@@ -2,7 +2,7 @@ common:
   img_topic: "/alphasense/cam0/image_raw"
   lid_topic: "/hesai/pandar"
   imu_topic: "/alphasense/imu"
-  img_en: 1
+  img_en: 0
   lidar_en: 1
   ros_driver_bug_fix: false
 
@@ -31,7 +31,7 @@ time_offset:
 preprocess:
   hilti_en: true
   point_filter_num: 1
-  filter_size_surf: 0.1 # 0.2
+  filter_size_surf: 0.25 # 0.2
   lidar_type: 5 # HesaiXT32
   scan_line: 32
   blind: 0.6 # 0.1 0.3
@@ -47,6 +47,7 @@ vio:
   inverse_composition_en: false
   exposure_estimate_en: true
   inv_expo_cov: 0.1
+  capacity: 0 # LRU cache capacity for visual feature map (0 = disable LRU cache)
 
 imu:
   imu_en: true
@@ -61,17 +62,18 @@ lio:
   dept_err: 0.02
   beam_err: 0.05
   min_eigen_value: 0.0001 # 0.0025
-  voxel_size: 0.4
+  voxel_size: 1
   max_layer: 2
-  max_points_num: 100
+  max_points_num: 50
   layer_init_num: [5, 5, 5, 5, 5]
   capacity: 10000  # LRU缓存容量, 越大占用内存越多 (0 = 禁用LRU缓存)
-
+  rf_enhance_en: true
+ 
 # Pillar Voxel 参数配置
 pillar_voxel:
   pillar_voxel_en: true
   min_adjacent_num: 2      # 相邻地面体素数量阈值
-  elevation_axis: "z"  # 可选值: "x", "-x", "y", "-y", "z", "-z"
+  elevation_axis: "-z"  # 可选值: "x", "-x", "y", "-y", "z", "-z"
 
 local_map: 
   map_sliding_en: false
@@ -80,7 +82,7 @@ local_map:
 
 uav:
   imu_rate_odom: false
-  gravity_align_en: true
+  gravity_align_en: false
 
 publish:
   dense_map_en: true
@@ -92,7 +94,7 @@ publish:
   blind_rgb_points: 0.0
 
 evo:
-  seq_name: "exp09_cupola"
+  seq_name: "exp02_construction_multilevel"
   pose_output_en: true
 
 lidar_save:

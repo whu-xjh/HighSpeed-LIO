@@ -99,7 +99,7 @@ Visualization Manager:
           Position Transformer: XYZ
           Queue Size: 100000
           Selectable: true
-          Size (Pixels): 4
+          Size (Pixels): 1
           Size (m): 0.009999999776482582
           Style: Points
           Topic: /cloud_registered
@@ -548,8 +548,8 @@ Visualization Manager:
   Value: true
   Views:
     Current:
-      Class: rviz/ThirdPersonFollower
-      Distance: 25.669620513916016
+      Class: rviz/Orbit
+      Distance: 50
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -557,17 +557,17 @@ Visualization Manager:
         Value: false
       Field of View: 0.7853981852531433
       Focal Point:
-        X: 5.083343982696533
-        Y: -9.8687162399292
-        Z: -3.4865479392465204e-05
+        X: 0
+        Y: 0
+        Z: 0
       Focal Shape Fixed Size: false
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: -0.10520334541797638
-      Target Frame: drone
-      Yaw: 3.161787748336792
+      Pitch: 0.785398
+      Target Frame: aft_mapped
+      Yaw: 0.785398
     Saved:
       - Class: rviz/Orbit
         Distance: 117.53474426269531

@@ -67,6 +67,8 @@ void loadVoxelConfig(ros::NodeHandle &nh, VoxelMapConfig &voxel_config)
   nh.param<std::string>("pillar_voxel/elevation_axis", voxel_config.elevation_axis_, "z");
   nh.param<bool>("pillar_voxel/pillar_voxel_en", voxel_config.pillar_voxel_en_, false);
   nh.param<int>("pillar_voxel/min_adjacent_num", voxel_config.min_adjacent_num_, 3);
+
+  nh.param<bool>("lio/rf_enhance_en", voxel_config.rf_enhance_en_, false);
 }
 
 void VoxelOctoTree::init_plane(const std::vector<pointWithVar> &points, VoxelPlane *plane)
@@ -640,7 +642,7 @@ VOXEL_COLUMN_LOCATION VoxelMapManager::GetColumnLocation(const VOXEL_LOCATION &p
 
 void VoxelMapManager::initHorizontalNeighborOffsets()
 {
-  horizontal_neighbor_offsets_.clear();
+  precomputed_neighbor_offsets_.clear();
 
   // 8邻域偏移量 (排除中心点)
   const std::vector<std::pair<int, int>> all_offsets = {
@@ -649,7 +651,29 @@ void VoxelMapManager::initHorizontalNeighborOffsets()
     {1, -1},  {1, 0},  {1, 1}
   };
 
-  horizontal_neighbor_offsets_ = all_offsets;
+  // 根据高程轴方向预计算完整的3D偏移量
+  precomputed_neighbor_offsets_.reserve(8);
+  for (const auto& offset : all_offsets) {
+    VOXEL_LOCATION voxel_offset;
+    switch (elevation_axis_index_) {
+      case 0: // 高程方向是x轴，水平面是yz平面
+        voxel_offset.x = 0;
+        voxel_offset.y = offset.first;
+        voxel_offset.z = offset.second;
+        break;
+      case 1: // 高程方向是y轴，水平面是xz平面
+        voxel_offset.x = offset.first;
+        voxel_offset.y = 0;
+        voxel_offset.z = offset.second;
+        break;
+      default: // 高程方向是z轴，水平面是xy平面
+        voxel_offset.x = offset.first;
+        voxel_offset.y = offset.second;
+        voxel_offset.z = 0;
+        break;
+    }
+    precomputed_neighbor_offsets_.push_back(voxel_offset);
+  }
 }
 
 void VoxelMapManager::UpdateGroundFlagForColumn(const VOXEL_COLUMN_LOCATION &column_key,
@@ -665,37 +689,29 @@ void VoxelMapManager::UpdateGroundFlagForColumn(const VOXEL_COLUMN_LOCATION &col
   // 只有当柱子中有多于一个体素时，才进行地面体素标记
   if (column_voxels.size() > 1)
   {
-    // 找到指定轴上最小值且不高于传感器中心的体素作为地面体素
+    // 找到指定轴上最小值的体素作为地面体素
     auto bottom_voxel = column_voxels.begin()->second;
     bool ground_voxel = false;
+    bool upper_voxel = false;
+
     for (auto &voxel_pair : column_voxels)
     {
       double current_height = voxel_pair.second->voxel_center_[elevation_axis_index_] * elevation_multiplier_;
       double bottom_height = bottom_voxel->voxel_center_[elevation_axis_index_] * elevation_multiplier_;
-      double upper_height = bottom_voxel->voxel_center_[elevation_axis_index_] * elevation_multiplier_ + config_setting_.max_voxel_size_;
       // double sensor_height = state_.pos_end[elevation_axis_index_] * elevation_multiplier_;
 
-      if (current_height <= bottom_height) {
+      if (current_height < bottom_height) {
         bottom_voxel = voxel_pair.second;
         ground_voxel = true;
+
+        if (bottom_height <= current_height + config_setting_.max_voxel_size_)
+        {
+          upper_voxel = true;
+        }
       }
     }
 
-    bool upper_voxel = false;
-    double upper_height = bottom_voxel->voxel_center_[elevation_axis_index_] * elevation_multiplier_ + config_setting_.max_voxel_size_;
-    double bottom_height = bottom_voxel->voxel_center_[elevation_axis_index_] * elevation_multiplier_;
-    for (auto &voxel_pair : column_voxels)
-    {
-      double current_height = voxel_pair.second->voxel_center_[elevation_axis_index_] * elevation_multiplier_;
-
-      if (current_height > bottom_height && current_height <= upper_height)
-      {
-        upper_voxel = true;
-      }
-      
-    }
-
-    // 只有找到有效地面体素时才标记
+    // 只有找到有效地面体素并且没有上方体素时才标记
     if (ground_voxel && !upper_voxel) {
       bottom_voxel->is_ground_voxel_ = true;
     }
@@ -1027,45 +1043,49 @@ void VoxelMapManager::BuildResidualListOMP(std::vector<pointWithVar> &pv_list, s
         // 如果当前体素未找到有效平面,则检查相邻体素
         VOXEL_LOCATION near_position = position;
 
-        if (loc_xyz[0] > (current_octo->voxel_center_[0] + current_octo->quater_length_))
-        { 
-          if(loc_xyz[0] > (current_octo->voxel_center_[0] + 2*current_octo->quater_length_)) near_position.x = near_position.x + 2; 
-          else near_position.x = near_position.x + 1; 
-        }
-        else if (loc_xyz[0] < (current_octo->voxel_center_[0] - current_octo->quater_length_)) 
-        { 
-          if (loc_xyz[0] < (current_octo->voxel_center_[0] - 2*current_octo->quater_length_)) near_position.x = near_position.x - 2; 
-          else near_position.x = near_position.x - 1; 
-        }
+        if (config_setting_.rf_enhance_en_)
+        {
+            if (loc_xyz[0] > (current_octo->voxel_center_[0] + current_octo->quater_length_))
+          { 
+            if(loc_xyz[0] > (current_octo->voxel_center_[0] + 2*current_octo->quater_length_)) near_position.x = near_position.x + 2; 
+            else near_position.x = near_position.x + 1; 
+          }
+          else if (loc_xyz[0] < (current_octo->voxel_center_[0] - current_octo->quater_length_)) 
+          { 
+            if (loc_xyz[0] < (current_octo->voxel_center_[0] - 2*current_octo->quater_length_)) near_position.x = near_position.x - 2; 
+            else near_position.x = near_position.x - 1; 
+          }
 
-        if (loc_xyz[1] > (current_octo->voxel_center_[1] + current_octo->quater_length_)) 
-        { 
-          if (loc_xyz[1] > (current_octo->voxel_center_[1] + 2*current_octo->quater_length_)) near_position.y = near_position.y + 2; 
-          else near_position.y = near_position.y + 1; 
-        }
-        else if (loc_xyz[1] < (current_octo->voxel_center_[1] - current_octo->quater_length_)) 
-        { 
-          if (loc_xyz[1] < (current_octo->voxel_center_[1] - 2*current_octo->quater_length_)) near_position.y = near_position.y - 2; 
-          else near_position.y = near_position.y - 1; 
-        }
+          if (loc_xyz[1] > (current_octo->voxel_center_[1] + current_octo->quater_length_)) 
+          { 
+            if (loc_xyz[1] > (current_octo->voxel_center_[1] + 2*current_octo->quater_length_)) near_position.y = near_position.y + 2; 
+            else near_position.y = near_position.y + 1; 
+          }
+          else if (loc_xyz[1] < (current_octo->voxel_center_[1] - current_octo->quater_length_)) 
+          { 
+            if (loc_xyz[1] < (current_octo->voxel_center_[1] - 2*current_octo->quater_length_)) near_position.y = near_position.y - 2; 
+            else near_position.y = near_position.y - 1; 
+          }
 
-        if (loc_xyz[2] > (current_octo->voxel_center_[2] + current_octo->quater_length_)) 
-        { 
-          if (loc_xyz[2] > (current_octo->voxel_center_[2] + 2*current_octo->quater_length_)) near_position.z = near_position.z + 2; 
-          else near_position.z = near_position.z + 1; 
+          if (loc_xyz[2] > (current_octo->voxel_center_[2] + current_octo->quater_length_)) 
+          { 
+            if (loc_xyz[2] > (current_octo->voxel_center_[2] + 2*current_octo->quater_length_)) near_position.z = near_position.z + 2; 
+            else near_position.z = near_position.z + 1; 
+          }
+          else if (loc_xyz[2] < (current_octo->voxel_center_[2] - current_octo->quater_length_)) 
+          { 
+            if (loc_xyz[2] < (current_octo->voxel_center_[2] - 2*current_octo->quater_length_)) near_position.z = near_position.z - 2; 
+            else near_position.z = near_position.z - 1; 
+          }
         }
-        else if (loc_xyz[2] < (current_octo->voxel_center_[2] - current_octo->quater_length_)) 
-        { 
-          if (loc_xyz[2] < (current_octo->voxel_center_[2] - 2*current_octo->quater_length_)) near_position.z = near_position.z - 2; 
-          else near_position.z = near_position.z - 1; 
+        else {
+          if (loc_xyz[0] > (current_octo->voxel_center_[0] + current_octo->quater_length_)) { near_position.x = near_position.x + 1; }
+          else if (loc_xyz[0] < (current_octo->voxel_center_[0] - current_octo->quater_length_)) { near_position.x = near_position.x - 1; }
+          if (loc_xyz[1] > (current_octo->voxel_center_[1] + current_octo->quater_length_)) { near_position.y = near_position.y + 1; }
+          else if (loc_xyz[1] < (current_octo->voxel_center_[1] - current_octo->quater_length_)) { near_position.y = near_position.y - 1; }
+          if (loc_xyz[2] > (current_octo->voxel_center_[2] + current_octo->quater_length_)) { near_position.z = near_position.z + 1; }
+          else if (loc_xyz[2] < (current_octo->voxel_center_[2] - current_octo->quater_length_)) { near_position.z = near_position.z - 1; }
         }
-
-        // if (loc_xyz[0] > (current_octo->voxel_center_[0] + current_octo->quater_length_)) { near_position.x = near_position.x + 1; }
-        // else if (loc_xyz[0] < (current_octo->voxel_center_[0] - current_octo->quater_length_)) { near_position.x = near_position.x - 1; }
-        // if (loc_xyz[1] > (current_octo->voxel_center_[1] + current_octo->quater_length_)) { near_position.y = near_position.y + 1; }
-        // else if (loc_xyz[1] < (current_octo->voxel_center_[1] - current_octo->quater_length_)) { near_position.y = near_position.y - 1; }
-        // if (loc_xyz[2] > (current_octo->voxel_center_[2] + current_octo->quater_length_)) { near_position.z = near_position.z + 1; }
-        // else if (loc_xyz[2] < (current_octo->voxel_center_[2] - current_octo->quater_length_)) { near_position.z = near_position.z - 1; }
 
         // 在相邻体素中查找平面,如果找到则构建残差
         auto iter_near = voxel_map_.find(near_position);
@@ -1376,29 +1396,21 @@ int VoxelMapManager::hasAdjacentGroundVoxel(VoxelOctoTree *current_octo, const V
 {
   int adjacent_ground_count = 0;
 
-  // 使用预计算的邻域偏移量查询表
-  for (const auto& offset : horizontal_neighbor_offsets_) {
+  for (const auto& voxel_offset : precomputed_neighbor_offsets_) {
+    
     // 计算相邻体素的位置
-    VOXEL_LOCATION adjacent_pos = current_pos;
-
-    // 根据高程轴方向设置偏移
-    if (elevation_axis_index_ == 0) { // 高程方向是x轴，水平面是yz平面
-      adjacent_pos.y = current_pos.y + offset.first;
-      adjacent_pos.z = current_pos.z + offset.second;
-    } else if (elevation_axis_index_ == 1) { // 高程方向是y轴，水平面是xz平面
-      adjacent_pos.x = current_pos.x + offset.first;
-      adjacent_pos.z = current_pos.z + offset.second;
-    } else { // 高程方向是z轴，水平面是xy平面
-      adjacent_pos.x = current_pos.x + offset.first;
-      adjacent_pos.y = current_pos.y + offset.second;
-    }
+    VOXEL_LOCATION adjacent_pos = {
+      current_pos.x + voxel_offset.x,
+      current_pos.y + voxel_offset.y,
+      current_pos.z + voxel_offset.z
+    };
 
     // 在voxel_map中查找相邻体素
     auto iter = voxel_map_.find(adjacent_pos);
     if (iter != voxel_map_.end()) {
       // VoxelOctoTree *adjacent_voxel = iter->second;
       VoxelOctoTree *adjacent_voxel = iter->second->second; // 修改这里
-      if (adjacent_voxel != nullptr && adjacent_voxel->is_ground_voxel_) {
+      if (adjacent_voxel && adjacent_voxel->is_ground_voxel_) {
         adjacent_ground_count++;
       }
     }
