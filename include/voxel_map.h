@@ -130,18 +130,6 @@ public:
   bool operator==(const VOXEL_COLUMN_LOCATION &other) const { return (axis1 == other.axis1 && axis2 == other.axis2); }
 };
 
-// Pillar Voxel 信息数据结构
-class PillarVoxel
-{
-public:
-  int32_t total_voxel_count;         // 该pillar中的总voxel数量
-  bool has_ground_voxel;            // 是否包含地面体素
-  double ground_voxel_elevation;    // 地面体素的高程值
-
-  PillarVoxel() : total_voxel_count(0), has_ground_voxel(false),
-                   ground_voxel_elevation(0.0){}
-};
-
 // Hash value
 namespace std
 {
@@ -246,9 +234,6 @@ public:
 
   std::unordered_map<VOXEL_COLUMN_LOCATION, std::map<int64_t, VoxelOctoTree *>> column_voxels_;
 
-  // Pillar voxel存储s
-  std::unordered_map<VOXEL_COLUMN_LOCATION, PillarVoxel> pillar_voxel_;
-
   PointCloudXYZI::Ptr feats_undistort_;
   PointCloudXYZI::Ptr feats_down_body_;
   PointCloudXYZI::Ptr feats_down_world_;
@@ -338,6 +323,8 @@ public:
 
   void mapSliding();
   void clearMemOutOfMap(const int& x_max,const int& x_min,const int& y_max,const int& y_min,const int& z_max,const int& z_min );
+
+  void ClearPillarVoxels();
 
 private:
   // 初始化水平面邻域偏移量查询表

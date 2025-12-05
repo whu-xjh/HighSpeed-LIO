@@ -688,7 +688,38 @@ void VoxelMapManager::UpdateGroundFlagForColumn(const VOXEL_COLUMN_LOCATION &col
 
   // 只有当柱子中有多于一个体素时，才进行地面体素标记
   if (column_voxels.size() > 1)
-  {
+  { 
+    // // 步骤1：找到最低的体素
+    // auto bottom_voxel = column_voxels.begin()->second;
+    // for (auto &voxel_pair : column_voxels) {
+    //   double current_height = voxel_pair.second->voxel_center_[elevation_axis_index_] * elevation_multiplier_;
+    //   double bottom_height = bottom_voxel->voxel_center_[elevation_axis_index_] * elevation_multiplier_;
+
+    //   if (current_height < bottom_height) {
+    //     bottom_voxel = voxel_pair.second;
+    //   }
+    // }
+
+    // // 步骤2：检查最低体素上方是否有其他体素
+    // double bottom_height = bottom_voxel->voxel_center_[elevation_axis_index_] * elevation_multiplier_;
+    // bool has_upper_voxel = false;
+
+    // for (auto &voxel_pair : column_voxels) {
+    //   if (voxel_pair.second == bottom_voxel) continue;
+
+    //   double current_height = voxel_pair.second->voxel_center_[elevation_axis_index_] * elevation_multiplier_;
+
+    //   if (current_height > bottom_height && current_height <= bottom_height + config_setting_.max_voxel_size_ / (2 ^ config_setting_.max_layer_)) {
+    //     has_upper_voxel = true;
+    //     break;
+    //   }
+    // }
+
+    // // 步骤3：根据结果标记
+    // if (!has_upper_voxel) {
+    //   bottom_voxel->is_ground_voxel_ = true;
+    // }
+
     // 找到指定轴上最小值的体素作为地面体素
     auto bottom_voxel = column_voxels.begin()->second;
     bool ground_voxel = false;
@@ -696,8 +727,8 @@ void VoxelMapManager::UpdateGroundFlagForColumn(const VOXEL_COLUMN_LOCATION &col
 
     for (auto &voxel_pair : column_voxels)
     {
-      double current_height = voxel_pair.second->voxel_center_[elevation_axis_index_] * elevation_multiplier_;
-      double bottom_height = bottom_voxel->voxel_center_[elevation_axis_index_] * elevation_multiplier_;
+      const double current_height = voxel_pair.second->voxel_center_[elevation_axis_index_] * elevation_multiplier_;
+      const double bottom_height = bottom_voxel->voxel_center_[elevation_axis_index_] * elevation_multiplier_;
       // double sensor_height = state_.pos_end[elevation_axis_index_] * elevation_multiplier_;
 
       if (current_height < bottom_height) {
@@ -775,6 +806,11 @@ void VoxelMapManager::UnregisterVoxelFromColumn(const VOXEL_LOCATION &position)
   {
     UpdateGroundFlagForColumn(column_key, column_voxels);
   }
+}
+
+void VoxelMapManager::ClearPillarVoxels()
+{
+  column_voxels_.clear();
 }
 
 // LRU

@@ -462,8 +462,10 @@ void LIVMapper::handleLIO()
   // double t_tran2 = omp_get_wtime();
   // printf("transformLidar time: %f\n", t_tran2 - t_tran1);
 
+  // voxelmap_manager->ClearPillarVoxels(); // 清除体素地图中的柱状体素
+
   // 首次运行时构建体素地图,基于八叉树结构
-  if (!lidar_map_inited) 
+  if (!lidar_map_inited)
   {
     lidar_map_inited = true;
     voxelmap_manager->BuildVoxelMap();
