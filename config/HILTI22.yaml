@@ -64,9 +64,9 @@ lio:
   min_eigen_value: 0.0001 # 0.0025
   voxel_size: 1
   max_layer: 2
-  max_points_num: 50
+  max_points_num: 64
   layer_init_num: [5, 5, 5, 5, 5]
-  capacity: 10000  # LRU缓存容量, 越大占用内存越多 (0 = 禁用LRU缓存)
+  capacity: 100000  # LRU缓存容量, 越大占用内存越多 (0 = 禁用LRU缓存)
   rf_enhance_en: true
  
 # Pillar Voxel 参数配置
